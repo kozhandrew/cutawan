@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Pause, RotateCcw } from 'lucide-react'
-import type { Clip, Project, WatermarkPosition } from '@shared/types'
-import { hexToRgba, resolveCaptionStyle } from '@shared/captionStyles'
-import {
-  captionLayoutBudget,
-  groupDisplayEnd,
-  groupWords,
-  wordsInRange
-} from '@shared/captionLayout'
+import type { Clip, Project } from '@shared/types'
 import { clipKeptSegments, TimeMap } from '@shared/tighten'
-import { automaticLayoutShots, clipAllowsAutoZoom, compositionHidesTitle, detailCaptionRanges, layoutBlocksAutoZoom } from '@shared/contentType'
-import { captionPositionAt } from '@shared/contentRegion'
+import { automaticLayoutShots, clipAllowsAutoZoom, layoutBlocksAutoZoom } from '@shared/contentType'
 import { computeZoomEvents, fitZoomEvents } from '@shared/zoom'
 import { formatTimecode } from '../lib/format'
 import {
@@ -21,6 +13,7 @@ import {
 import { applyPreviewVideoFrame } from '../lib/previewVideo'
 import { usePreviewBus } from '../lib/previewBus'
 import { useStore } from '../store'
+import { ExportOverlay } from './ExportOverlay'
 
 /**
  * Live preview that mimics the exported result: bounded playback of the clip
@@ -60,6 +53,7 @@ export default function PreviewPlayer({
   const setBusTime = usePreviewBus((s) => s.setTime)
   const setSeekHandler = usePreviewBus((s) => s.setSeekHandler)
   const setScrubHandler = usePreviewBus((s) => s.setScrubHandler)
+  const branding = useStore((s) => s.settings?.branding)
 
   const setTime = useCallback(
     (t: number): void => {
@@ -321,19 +315,14 @@ export default function PreviewPlayer({
           />
         </div>
         <canvas ref={overviewRef} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 hidden w-full" />
-        <BrollOverlay clip={clip} time={time} />
-        <WatermarkOverlay />
-        {clip.edit.captionsEnabled && project.transcript && (
-          <CaptionOverlay
-            transcript={project.transcript}
-            clip={clip}
-            time={time}
-            aspectRatio={aspectStyle}
-          />
-        )}
-        {clip.edit.showTitle && !compositionHidesTitle(clip) && (clip.hook || clip.title) && time - start < Math.min(4, duration) && (
-          <HookOverlay clip={clip} />
-        )}
+        <ExportOverlay
+          clip={clip}
+          transcript={project.transcript}
+          branding={branding}
+          mediaTime={time}
+          aspectRatio={aspectStyle}
+          mediaUrl={window.cutawan.mediaUrl}
+        />
         {!playing && (
           <button
             onClick={togglePlay}
@@ -373,189 +362,6 @@ export default function PreviewPlayer({
           {formatTimecode(outputTime)} / {formatTimecode(outputDuration)}
         </span>
       </div>
-    </div>
-  )
-}
-
-/** Mirrors the export's branding watermark (same corner, size and opacity). */
-function WatermarkOverlay(): React.JSX.Element | null {
-  const branding = useStore((s) => s.settings?.branding)
-  if (!branding?.enabled || !branding.imagePath) return null
-  const margin = '3cqw'
-  const corner: Record<WatermarkPosition, React.CSSProperties> = {
-    'top-left': { top: margin, left: margin },
-    'top-right': { top: margin, right: margin },
-    'bottom-left': { bottom: margin, left: margin },
-    'bottom-right': { bottom: margin, right: margin }
-  }
-  return (
-    <img
-      src={window.cutawan.mediaUrl(branding.imagePath)}
-      alt=""
-      className="pointer-events-none absolute"
-      style={{
-        width: `${Math.min(0.5, Math.max(0.04, branding.scale)) * 100}cqw`,
-        opacity: Math.min(1, Math.max(0.05, branding.opacity)),
-        ...corner[branding.position]
-      }}
-    />
-  )
-}
-
-/**
- * Hook "card" shown for the first seconds of the clip. Mirrors the ASS Title
- * style burned in on export (`captions.ts`): a filled translucent label at the
- * top with a soft shadow, in the clip's caption font, so the preview matches
- * the render.
- */
-function HookOverlay({ clip }: { clip: Clip }): React.JSX.Element {
-  const brandColors = useStore((s) => s.settings?.branding.colors)
-  const style = resolveCaptionStyle(
-    clip.edit.captionStyleId,
-    brandColors,
-    clip.edit.captionFontFamily
-  )
-  const hookTextColor = brandColors?.enabled ? brandColors.hookTextColor : '#FFFFFF'
-  const hookBackgroundColor = brandColors?.enabled
-    ? hexToRgba(brandColors.hookBackgroundColor, 0.75)
-    : 'rgba(0,0,0,0.75)'
-  return (
-    <div
-      className="pointer-events-none absolute inset-x-0 flex justify-center px-[6cqw]"
-      style={{ top: '7cqh' }}
-    >
-      <span
-        className="hook-in inline-block max-w-[80cqw] text-center"
-        style={{
-          fontFamily: `'${style.fontFamily}', sans-serif`,
-          fontWeight: 700,
-          fontSize: '4.4cqh',
-          lineHeight: 1.2,
-          color: hookTextColor,
-          padding: '0.7cqh 1.4cqh',
-          borderRadius: '0.8cqh',
-          backgroundColor: hookBackgroundColor,
-          boxShadow: '0 0.4cqh 1.4cqh rgba(0,0,0,0.45)',
-          textWrap: 'balance'
-        }}
-      >
-        {clip.hook || clip.title}
-      </span>
-    </div>
-  )
-}
-
-function BrollOverlay({ clip, time }: { clip: Clip; time: number }): React.JSX.Element | null {
-  const active = clip.broll.find(
-    (b) => b.enabled && b.imagePath && time >= b.start && time <= b.end
-  )
-  if (!active) return null
-  const src = window.cutawan.mediaUrl(active.imagePath!)
-  if (active.mode === 'fullscreen') {
-    return (
-      <img
-        src={src}
-        alt={active.trigger}
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-      />
-    )
-  }
-  return (
-    <div
-      className="pointer-events-none absolute inset-x-0 flex justify-center"
-      style={{ top: '10cqh' }}
-    >
-      <img
-        src={src}
-        alt={active.trigger}
-        className="border-4 border-white shadow-2xl"
-        style={{ width: '62%', height: 'auto' }}
-      />
-    </div>
-  )
-}
-
-function CaptionOverlay({
-  transcript,
-  clip,
-  time,
-  aspectRatio
-}: {
-  transcript: NonNullable<Project['transcript']>
-  clip: Clip
-  time: number
-  /** Output frame width / height; decides how much text fits on a line. */
-  aspectRatio: number
-}): React.JSX.Element | null {
-  const brandColors = useStore((s) => s.settings?.branding.colors)
-  const style = useMemo(
-    () => resolveCaptionStyle(clip.edit.captionStyleId, brandColors, clip.edit.captionFontFamily),
-    [clip.edit.captionStyleId, brandColors, clip.edit.captionFontFamily]
-  )
-
-  // Same grouping and line layout the ASS export uses, so what wraps here
-  // wraps identically in the file.
-  const groups = useMemo(() => {
-    const words = wordsInRange(transcript, clip.edit.start, clip.edit.end)
-    return groupWords(words, captionLayoutBudget(style, aspectRatio))
-  }, [transcript, clip.edit.start, clip.edit.end, style, aspectRatio])
-
-  const groupIndex = groups.findIndex(
-    (g, i) => time >= g.start && time < groupDisplayEnd(groups, i, clip.edit.end)
-  )
-  if (groupIndex === -1) return null
-  const group = groups[groupIndex]
-
-  let activeIdx = -1
-  for (let i = 0; i < group.words.length; i++) {
-    if (time >= group.words[i].start) activeIdx = i
-  }
-
-  let index = 0
-  return (
-    <div
-      className="pointer-events-none absolute inset-x-0 flex flex-col items-center text-center"
-      style={{ top: `${captionPositionAt(detailCaptionRanges(clip), time, style.positionY) * 100}cqh`, transform: 'translateY(-50%)' }}
-    >
-      {group.lines.map((line, li) => (
-        <div
-          key={li}
-          className="whitespace-nowrap"
-          style={{
-            fontFamily: `'${style.fontFamily}', sans-serif`,
-            fontSize: `${style.fontScale * 100}cqh`,
-            fontWeight: style.bold ? 700 : 400,
-            lineHeight: 1.25,
-            textShadow:
-              style.outlineWidth > 0
-                ? `0 0 ${style.outlineWidth * 2}px ${style.outlineColor}, 2px 2px ${style.outlineWidth}px ${style.outlineColor}, -2px 2px ${style.outlineWidth}px ${style.outlineColor}, 2px -2px ${style.outlineWidth}px ${style.outlineColor}, -2px -2px ${style.outlineWidth}px ${style.outlineColor}`
-                : 'none'
-          }}
-        >
-          {line.map((w, wi) => {
-            const wordIndex = index++
-            const active = wordIndex === activeIdx
-            const text = style.uppercase ? w.text.toUpperCase() : w.text
-            return (
-              <span
-                key={`${w.start}-${wordIndex}`}
-                className={active ? 'caption-pop inline-block' : 'inline-block'}
-                style={{
-                  color: active ? style.highlightColor : style.textColor,
-                  backgroundColor:
-                    active && style.highlightBoxColor ? style.highlightBoxColor : 'transparent',
-                  borderRadius: style.highlightBoxColor ? '0.35em' : undefined,
-                  padding: style.highlightBoxColor ? '0 0.18em' : undefined,
-                  // Word gap mirrors the ASS space; none after the line's last word.
-                  marginRight: wi === line.length - 1 ? undefined : '0.28em'
-                }}
-              >
-                {text}
-              </span>
-            )
-          })}
-        </div>
-      ))}
     </div>
   )
 }

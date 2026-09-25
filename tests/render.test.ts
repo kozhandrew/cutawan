@@ -161,6 +161,17 @@ describe('buildFilterGraph', () => {
     expect(noImage.filterComplex).not.toContain('colorchannelmixer')
   })
 
+  it('uses one Chromium visual overlay instead of duplicate ASS and watermark layers', () => {
+    const graph = buildFilterGraph(makeClip(), source, '/tmp/subs.ass', 30, null, {
+      branding,
+      visualOverlayInput: 1
+    })
+    expect(graph.extraInputs).toEqual([])
+    expect(graph.filterComplex).toContain('[reframed][1:v]overlay=0:0')
+    expect(graph.filterComplex).not.toContain('ass=filename')
+    expect(graph.filterComplex).not.toContain('colorchannelmixer')
+  })
+
   it('pans the crop for within-shot focus moves and snaps at cuts', () => {
     const clip = makeClip()
     clip.edit.framing = 'auto'

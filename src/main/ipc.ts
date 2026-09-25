@@ -20,7 +20,8 @@ import { captionWholeVideo } from './pipeline/wholeVideo'
 import { downloadGpuFfmpeg } from './pipeline/encoders'
 import { probeVideo } from './pipeline/ffmpeg'
 import { getTimeline } from './pipeline/timeline'
-import { renderClip } from './pipeline/render'
+import { renderClip, type RenderJob } from './pipeline/render'
+import { streamChromiumOverlayFrames } from './overlayRenderer'
 import { ensureClipReframe } from './pipeline/reframe'
 import { cancelBackgroundReframes, startBackgroundReframes } from './pipeline/backgroundReframe'
 import { generateSocialCaption } from './pipeline/socialCaption'
@@ -275,7 +276,11 @@ export function registerIpcHandlers(): void {
       // Also join explicit retries of already-completed layouts.
       project = await ensureClipReframe(projectId, clip.id, controller.signal)
       clip = project.clips.find((c) => c.id === opts.clipId) ?? clip
-      const rendered = await renderClip({
+      const renderBranding = {
+        ...branding,
+        imagePath: branding.imagePath && existsSync(branding.imagePath) ? branding.imagePath : null
+      }
+      const renderJob: RenderJob = {
         clip,
         source: project.video,
         transcript: project.transcript,
@@ -283,10 +288,7 @@ export function registerIpcHandlers(): void {
         encoder: prefs.encoder,
         quality: prefs.quality,
         sizeTargetBytes,
-        branding: {
-          ...branding,
-          imagePath: branding.imagePath && existsSync(branding.imagePath) ? branding.imagePath : null
-        },
+        branding: renderBranding,
         fontsDirPath: await renderFontsDir(),
         signal: controller.signal,
         onProgress: (fraction) => {
@@ -294,7 +296,37 @@ export function registerIpcHandlers(): void {
             event.sender.send('export:progress', { clipId: clip.id, progress: fraction, message: 'Rendering…' })
           }
         }
-      })
+      }
+      const hasVisualOverlay =
+        (clip.edit.captionsEnabled && Boolean(project.transcript)) ||
+        (clip.edit.showTitle && Boolean(clip.hook || clip.title)) ||
+        clip.broll.some((item) => item.enabled && Boolean(item.imagePath)) ||
+        Boolean(renderBranding.enabled && renderBranding.imagePath)
+      let rendered
+      if (hasVisualOverlay) {
+        try {
+          rendered = await renderClip({
+            ...renderJob,
+            visualOverlay: {
+              customFonts: await listCustomFonts(),
+              streamFrames: streamChromiumOverlayFrames
+            }
+          })
+        } catch (error) {
+          if (controller.signal.aborted) throw error
+          console.error('Chromium overlay render failed; retrying with ASS/libass:', error)
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('export:progress', {
+              clipId: clip.id,
+              progress: 0,
+              message: 'High-fidelity renderer unavailable; using compatibility renderer…'
+            })
+          }
+          rendered = await renderClip(renderJob)
+        }
+      } else {
+        rendered = await renderClip(renderJob)
+      }
       return {
         clipId: clip.id,
         outputPath: rendered.outputPath,

@@ -3,10 +3,12 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import type { Writable } from 'node:stream'
 import type {
   AspectRatio,
   BrandingSettings,
   Clip,
+  CustomFont,
   FocusKeyframe,
   QualityPreference,
   Transcript,
@@ -22,6 +24,8 @@ import { resolveCaptionStyle } from '@shared/captionStyles'
 import { computeZoomEvents, fitZoomEvents, remapZoomEvents, type ZoomEvent } from '@shared/zoom'
 import { planUploadEncode, type UploadEncodePlan } from '@shared/uploadBudget'
 import { FFMPEG_PATH, probeVideo, runFfmpegWith } from './ffmpeg'
+import { runFfmpegWithFrames } from './ffmpegPipe'
+import type { OverlayFrameRequest } from '../overlayRenderer'
 import { timed } from './timing'
 import { loudnormFilter, measureLoudness, normalisationMode, type LoudnessStats } from './loudness'
 import { buildAss, fontsDir } from './captions'
@@ -455,13 +459,16 @@ export function buildFilterGraph(
      */
     loudness?: LoudnessStats | null
     audioTailSec?: number
+    /** FFmpeg input containing the complete transparent Chromium overlay. */
+    visualOverlayInput?: number
   }
 ): FilterGraph {
   const { w, h } = targetDims(clip.edit.aspect, source)
   const parts: string[] = []
   const extraInputs: string[] = []
 
-  const items = clip.broll.filter(
+  const visualOverlayInput = options?.visualOverlayInput
+  const items = visualOverlayInput === undefined ? clip.broll.filter(
     (b) =>
       b.enabled &&
       b.imagePath !== null &&
@@ -470,7 +477,7 @@ export function buildFilterGraph(
       existsSync(b.imagePath) &&
       b.end > clip.edit.start &&
       b.start < clip.edit.end
-  )
+  ) : []
 
   // A fullscreen B-roll insert brings a second crop filter into the graph, and
   // sendcmd addresses filters by class name (instance names are not honoured
@@ -537,7 +544,7 @@ export function buildFilterGraph(
   })
 
   const branding = options?.branding
-  if (branding?.enabled && branding.imagePath) {
+  if (visualOverlayInput === undefined && branding?.enabled && branding.imagePath) {
     const input = items.length + 1
     extraInputs.push('-loop', '1', '-t', clipDuration.toFixed(3), '-i', branding.imagePath)
     const wmWidth = Math.max(2, Math.round(w * Math.min(0.5, Math.max(0.04, branding.scale))))
@@ -554,7 +561,11 @@ export function buildFilterGraph(
 
   // Square pixels: an even-rounded crop scaled to exact output dimensions
   // otherwise carries a sample aspect like 404:405 that players honour.
-  if (assPath) {
+  if (visualOverlayInput !== undefined) {
+    parts.push(
+      `[${current}][${visualOverlayInput}:v]overlay=0:0:format=auto:eof_action=pass,setsar=1[vout]`
+    )
+  } else if (assPath) {
     const fontsDirPath = options?.fontsDirPath ?? fontsDir()
     parts.push(
       `[${current}]ass=filename='${escapeFilterPath(assPath)}':fontsdir='${escapeFilterPath(fontsDirPath)}',setsar=1[vout]`
@@ -571,12 +582,19 @@ export function buildFilterGraph(
   }
 }
 
+export interface VisualOverlayRenderer {
+  customFonts: CustomFont[]
+  streamFrames: (request: OverlayFrameRequest, stream: Writable) => Promise<void>
+}
+
 export interface RenderJob {
   clip: Clip
   source: VideoInfo
   transcript: Transcript | null
   outputPath: string
   encoder?: EncoderPreference
+  /** High-fidelity Chromium renderer. Omit to keep the ASS/libass fallback. */
+  visualOverlay?: VisualOverlayRenderer
   quality?: QualityPreference
   /** App-wide watermark/logo composited under the captions. */
   branding?: BrandingSettings | null
@@ -670,7 +688,7 @@ async function render(job: RenderJob): Promise<RenderResult> {
   }
 
   let assPath: string | null = null
-  if (clip.edit.captionsEnabled && captionTranscript) {
+  if (!job.visualOverlay && clip.edit.captionsEnabled && captionTranscript) {
     // libass sizes text against the font's win ascent+descent, not the em
     // square the preview uses, so the ASS needs the resolved font's metrics
     // to come out the same size on screen (see assFontSize).
@@ -738,7 +756,8 @@ async function render(job: RenderJob): Promise<RenderResult> {
       zoomEvents,
       focusCommandsPath,
       loudness,
-      audioTailSec: speechSafeFade(captionTranscript, captionStart, captionEnd)
+      audioTailSec: speechSafeFade(captionTranscript, captionStart, captionEnd),
+      visualOverlayInput: job.visualOverlay ? 1 : undefined
     }
   )
   if (graph.focusCommands) await writeFile(focusCommandsPath, graph.focusCommands, 'utf8')
@@ -790,6 +809,12 @@ async function render(job: RenderJob): Promise<RenderResult> {
     filterArgs = ['-filter_complex_script', filterScriptPath]
   }
 
+  const visualOverlay = job.visualOverlay
+  const overlayFps = plan?.fps ?? source.fps
+  const overlayInputArgs = visualOverlay
+    ? ['-f', 'image2pipe', '-framerate', String(overlayFps), '-i', 'pipe:3']
+    : []
+
   /**
    * The audio output is always mapped when the graph produces one: leaving it
    * unconnected makes ffmpeg refuse the whole graph, so a two-pass analysis
@@ -804,6 +829,7 @@ async function render(job: RenderJob): Promise<RenderResult> {
     '-t', duration.toFixed(3),
     '-i', source.path,
     ...graph.extraInputs,
+    ...overlayInputArgs,
     ...filterArgs,
     '-map', `[${videoLabel}]`,
     ...(graph.audioLabel ? ['-map', `[${graph.audioLabel}]`] : []),
@@ -821,12 +847,27 @@ async function render(job: RenderJob): Promise<RenderResult> {
     signal: job.signal
   })
 
+  const runEncode = (bin: string, args: string[], opts: Parameters<typeof runFfmpegWith>[2]): Promise<string> => {
+    if (!visualOverlay) return runFfmpegWith(bin, args, opts)
+    const request: OverlayFrameRequest = {
+      clip: {
+        ...effectiveClip,
+        broll: effectiveClip.broll.filter((item) => item.imagePath && existsSync(item.imagePath))
+      }, transcript: captionTranscript, branding: job.branding,
+      customFonts: visualOverlay.customFonts,
+      width: w, height: h,
+      duration: outputDuration, fps: overlayFps,
+      signal: job.signal
+    }
+    return runFfmpegWithFrames(bin, args, (stream) => visualOverlay.streamFrames(request, stream), opts)
+  }
+
   const passLogPrefix = plan ? join(tempDir, `x264-${randomUUID()}`) : null
 
   try {
     if (plan && passLogPrefix) {
       // Pass 1 analyses (video only, discarded); pass 2 encodes to the target.
-      await runFfmpegWith(
+      await runEncode(
         FFMPEG_PATH,
         buildArgs({
           videoArgs: sizeTargetedVideoArgs(1, plan.videoKbps, passLogPrefix),
@@ -835,7 +876,7 @@ async function render(job: RenderJob): Promise<RenderResult> {
         }),
         runOpts(0, 0.5)
       )
-      await runFfmpegWith(
+      await runEncode(
         FFMPEG_PATH,
         buildArgs({
           videoArgs: sizeTargetedVideoArgs(2, plan.videoKbps, passLogPrefix),
@@ -848,7 +889,7 @@ async function render(job: RenderJob): Promise<RenderResult> {
     } else {
       const resolved = await resolveEncoder(job.encoder ?? 'auto')
       try {
-        await runFfmpegWith(
+        await runEncode(
           resolved.bin,
           buildArgs({
             videoArgs: encoderArgs(resolved.kind, quality),
@@ -863,7 +904,7 @@ async function render(job: RenderJob): Promise<RenderResult> {
         if (resolved.kind !== 'cpu' && job.encoder !== 'gpu' && !job.signal?.aborted) {
           console.error(`${resolved.kind} render failed, retrying on CPU:`, err)
           await rm(job.outputPath, { force: true }).catch(() => undefined)
-          await runFfmpegWith(
+          await runEncode(
             resolved.bin,
             buildArgs({
               videoArgs: encoderArgs('cpu', quality),
