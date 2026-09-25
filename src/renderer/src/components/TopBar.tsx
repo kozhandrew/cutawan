@@ -1,6 +1,7 @@
 import { Settings, ChevronLeft, ArrowUpCircle, Plus } from 'lucide-react'
 import appIcon from '../assets/icon.webp'
 import { editorBackScreen, useStore } from '../store'
+import { customBuildLabel } from '@shared/buildIdentifier'
 
 export default function TopBar(): React.JSX.Element {
   const screen = useStore((s) => s.screen)
@@ -12,6 +13,7 @@ export default function TopBar(): React.JSX.Element {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const settings = useStore((s) => s.settings)
   const updateCheck = useStore((s) => s.updateCheck)
+  const customBuild = customBuildLabel(import.meta.env.VITE_CUTAWAN_GIT_SHA ?? '')
   const download = useStore((s) => s.updateDownload)
 
   const showBack = screen === 'clips' || screen === 'editor'
@@ -46,8 +48,15 @@ export default function TopBar(): React.JSX.Element {
           <span className="rounded-full border border-surface-600 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
             Open source
           </span>
+          <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium tracking-wide text-amber-300" title="Custom Cutawan build">
+            {customBuild}
+          </span>
         </div>
       )}
+
+      {showBack && <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium tracking-wide text-amber-300" title="Custom Cutawan build">
+        {customBuild}
+      </span>}
 
       {showBack && project && (
         <div className="min-w-0 flex-1 truncate text-center text-sm font-medium text-zinc-300">

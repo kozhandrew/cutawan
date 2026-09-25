@@ -159,6 +159,14 @@ export interface BrollItem {
   enabled: boolean
 }
 
+/** Persisted export reference. Optional so projects saved by older builds load unchanged. */
+export interface ClipExportState {
+  status: 'done' | 'stale'
+  outputPath: string
+  bytes: number
+  exportedAt: number
+}
+
 export interface Clip {
   id: string
   /**
@@ -214,6 +222,8 @@ export interface Clip {
   contentType?: ClipContentType | null
   /** AI-suggested image inserts timed to spoken keywords. */
   broll: BrollItem[]
+  /** Latest successful render; stale means the source clip changed afterwards. */
+  export?: ClipExportState
   edit: ClipEditState
 }
 
@@ -361,6 +371,13 @@ export interface ExportResult {
    * file stays under the cap; compare `bytes` to `sizeTargetBytes`.
    */
   overBudget?: boolean
+  /** Persisted status that the renderer can graft into the open project. */
+  exportState: ClipExportState
+}
+
+export interface ClipInfoExportResult {
+  markdownPath: string
+  csvPath: string
 }
 
 export type EncoderPreference = 'auto' | 'cpu' | 'gpu'

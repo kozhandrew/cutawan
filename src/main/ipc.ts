@@ -2,7 +2,7 @@ import { checkLocalWhisperSetup, checkSubscriptionSetup } from './subscription'
 import { cancelLocalWhisperInstall, installLocalWhisper, type LocalWhisperModel } from './localWhisper'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync } from 'node:fs'
-import { copyFile, mkdir, rm } from 'node:fs/promises'
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import type {
   AnalyzeOptions,
@@ -14,6 +14,8 @@ import type {
 } from '@shared/types'
 import { VIDEO_EXTENSIONS } from '@shared/video'
 import { sizeTargetBytesFromMb } from '@shared/uploadBudget'
+import { invalidateExportForClipSave, staleExportForTranscriptChange } from '@shared/exportState'
+import { highlightClips } from '@shared/wholeVideo'
 import { mergeClipSave, needsReframe } from '@shared/reframe'
 import { analyzeProject, createProject, createProjectFromUrl } from './pipeline'
 import { captionWholeVideo } from './pipeline/wholeVideo'
@@ -28,6 +30,7 @@ import { generateSocialCaption } from './pipeline/socialCaption'
 import { addCustomFonts, listCustomFonts, removeCustomFont, renderFontsDir } from './fonts'
 import { clearImportCookiesFile, installImportCookiesFile } from './cookies'
 import { checkForUpdates, downloadUpdate, installUpdate, updateFromSource, getUpdateDownloadState, onUpdateDownloadState, openUpdateInstaller, cancelUpdateDownload } from './updates'
+import { clipInfoCsv, clipInfoMarkdown } from './clipMetadata'
 import { UpdateActivity } from './updateActivity'
 import { isMediaPathAllowed } from './mediaAccess'
 import { sanitizeFileName, uniqueOutputPath } from './exportPath'
@@ -180,6 +183,19 @@ export function registerIpcHandlers(): void {
 
   handle('project:list', async () => listProjects())
   handle('project:load', async (_e, id: string) => loadProject(id))
+  handle('project:exportClipInfo', async (_e, projectId: string, outputDir: string) => {
+    const project = await loadProject(projectId)
+    const clips = highlightClips(project)
+    if (clips.length === 0) throw new Error('No detected clips to export.')
+    await mkdir(outputDir, { recursive: true })
+    const markdownPath = join(outputDir, 'cutawan-clip-info.md')
+    const csvPath = join(outputDir, 'cutawan-clip-info.csv')
+    await Promise.all([
+      writeFile(markdownPath, clipInfoMarkdown(clips), 'utf8'),
+      writeFile(csvPath, clipInfoCsv(clips), 'utf8')
+    ])
+    return { markdownPath, csvPath }
+  })
   handle('project:delete', async (_e, id: string) => {
     cancelBackgroundReframes(id)
     return deleteProject(id)
@@ -193,7 +209,8 @@ export function registerIpcHandlers(): void {
       // The renderer may save a copy it took before a lazy reframe analysis
       // landed on disk. The analysis result belongs to main: keep it rather
       // than letting the stale copy erase the focus track.
-      project.clips[idx] = mergeClipSave(clip, saved, project.videoType)
+      const merged = mergeClipSave(clip, saved, project.videoType)
+      project.clips[idx] = invalidateExportForClipSave(merged, saved)
     })
   })
 
@@ -220,6 +237,7 @@ export function registerIpcHandlers(): void {
           .map((w) => w.text)
           .filter((t) => t.length > 0)
           .join(' ')
+        project.clips = project.clips.map(staleExportForTranscriptChange)
       })
     }
   )
@@ -258,7 +276,9 @@ export function registerIpcHandlers(): void {
     if (runningExports.has(clip.id)) throw new Error('This clip is already exporting.')
 
     const suffix = clip.edit.aspect === 'original' ? '' : ` (${clip.edit.aspect.replace(':', 'x')})`
-    const outputPath = uniqueOutputPath(opts.outputDir, `${sanitizeFileName(clip.title)}${suffix}`)
+    const previousOutputPath = clip.export?.outputPath
+    const outputPath = previousOutputPath && existsSync(previousOutputPath)
+      ? previousOutputPath : uniqueOutputPath(opts.outputDir, `${sanitizeFileName(clip.title)}${suffix}`)
     const prefs = getExportPreferences()
     const sizeTargetBytes = sizeTargetBytesFromMb(prefs.sizeTargetMb)
     const branding = getBrandingSettings()
@@ -327,10 +347,20 @@ export function registerIpcHandlers(): void {
       } else {
         rendered = await renderClip(renderJob)
       }
+      const exportState = {
+        status: 'done' as const, outputPath: rendered.outputPath,
+        bytes: rendered.bytes, exportedAt: Date.now()
+      }
+      await updateProject(projectId, (fresh) => {
+        const target = fresh.clips.find((item) => item.id === clip.id)
+        if (!target) throw new Error('Clip not found')
+        target.export = exportState
+      })
       return {
         clipId: clip.id,
         outputPath: rendered.outputPath,
         bytes: rendered.bytes,
+        exportState,
         ...(sizeTargetBytes !== undefined
           ? {
               sizeTargetBytes,
@@ -341,7 +371,7 @@ export function registerIpcHandlers(): void {
       }
     } catch (err) {
       if (controller.signal.aborted) {
-        await rm(outputPath, { force: true }).catch(() => undefined)
+        // renderClip only writes a partial file until validation succeeds; keep any prior MP4 intact.
         throw new Error(EXPORT_CANCELLED_MESSAGE, { cause: err })
       }
       throw err
@@ -352,6 +382,13 @@ export function registerIpcHandlers(): void {
 
   handle('clip:cancelExport', async (_e, clipId: string) => {
     runningExports.get(clipId)?.abort()
+  })
+  handle('clip:clearExport', async (_e, projectId: string, clipId: string) => {
+    return updateProject(projectId, (project) => {
+      const clip = project.clips.find((item) => item.id === clipId)
+      if (!clip) throw new Error('Clip not found')
+      delete clip.export
+    })
   })
 
   handle('clip:generateCaption', async (_e, projectId: string, clipId: string) => {

@@ -5,6 +5,7 @@ import { captionLayoutBudget, groupDisplayEnd, groupWords, wordsInRange } from '
 import { compositionHidesTitle, detailCaptionRanges } from '@shared/contentType'
 import { captionPositionAt } from '@shared/contentRegion'
 import { captionPopScale, hookEntrance } from '@shared/overlayTiming'
+import { captionTextShadow } from '@shared/overlayEffects'
 
 export interface ExportOverlayProps {
   clip: Clip
@@ -88,9 +89,7 @@ export function CaptionOverlay({ transcript, clip, time, aspectRatio, brandColor
     {group.lines.map((line, lineIndex) => <div key={lineIndex} className="whitespace-nowrap" style={{
       fontFamily: `'${style.fontFamily}', sans-serif`, fontSize: `${style.fontScale * 100}cqh`,
       fontWeight: style.bold ? 700 : 400, lineHeight: 1.25,
-      textShadow: style.outlineWidth > 0
-        ? `0 0 ${style.outlineWidth * 2}px ${style.outlineColor}, 2px 2px ${style.outlineWidth}px ${style.outlineColor}, -2px 2px ${style.outlineWidth}px ${style.outlineColor}, 2px -2px ${style.outlineWidth}px ${style.outlineColor}, -2px -2px ${style.outlineWidth}px ${style.outlineColor}`
-        : 'none'
+      textShadow: captionTextShadow(style)
     }}>
       {line.map((word, wordInLine) => {
         const wordIndex = index++

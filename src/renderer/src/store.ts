@@ -79,7 +79,7 @@ export function editorBackScreen(project: Project | null, clipId: string | null)
 }
 
 export interface ExportEntry {
-  status: 'exporting' | 'done' | 'error'
+  status: 'exporting' | 'done' | 'stale' | 'error'
   progress: number
   outputPath?: string
   error?: string
@@ -89,6 +89,17 @@ export interface ExportEntry {
   overBudget?: boolean
 }
 
+function persistedExports(project: Project): Record<string, ExportEntry> {
+  return Object.fromEntries(project.clips.flatMap((clip) => {
+    if (!clip.export) return []
+    return [[clip.id, {
+      status: clip.export.status,
+      progress: 1,
+      outputPath: clip.export.outputPath,
+      bytes: clip.export.bytes
+    }]]
+  }))
+}
 
 interface AppState {
   screen: Screen
@@ -155,7 +166,8 @@ interface AppState {
   cancelExport: (clipId: string) => Promise<void>
   exportAll: () => Promise<void>
   chooseExportDir: () => Promise<void>
-  clearExport: (clipId: string) => void
+  exportClipInfo: () => Promise<{ markdownPath: string; csvPath: string } | null>
+  clearExport: (clipId: string) => Promise<void>
   addFonts: () => Promise<void>
   removeFont: (fileName: string) => Promise<void>
   importCookiesFile: () => Promise<void>
@@ -279,6 +291,7 @@ export const useStore = create<AppState>((set, get) => ({
     const wholeVideo = project.mode === 'whole-video' ? findWholeVideoClip(project) : null
     set({
       project,
+      exports: persistedExports(project),
       screen: wholeVideo ? 'editor' : project.clips.length > 0 ? 'clips' : 'home',
       selectedClipId: wholeVideo?.id ?? null,
       pipelineError: null
@@ -416,11 +429,24 @@ export const useStore = create<AppState>((set, get) => ({
     // The stored copy is the last saved state (local edits during typing and
     // drags replace it only here), so start history from it whichever way
     // the editor was opened.
-    const saved = project.clips.find((c) => c.id === clip.id)
-    if (saved) trackClip(saved)
+    const previousClip = project.clips.find((c) => c.id === clip.id)
+    if (previousClip) trackClip(previousClip)
     get().updateClipLocal(clip)
     if (recordSave(clip)) set({ historyVersion: get().historyVersion + 1 })
-    await window.cutawan.updateClip(project.id, clip)
+    const updated = await window.cutawan.updateClip(project.id, clip)
+    const saved = updated.clips.find((item) => item.id === clip.id)
+    const current = get().project
+    if (saved && current?.id === updated.id) {
+      const exports = { ...get().exports }
+      if (saved.export) {
+        exports[clip.id] = { ...exports[clip.id], status: saved.export.status, progress: 1,
+          outputPath: saved.export.outputPath, bytes: saved.export.bytes }
+      }
+      set({ exports, project: {
+        ...current,
+        clips: current.clips.map((item) => item.id === clip.id ? saved : item)
+      } })
+    }
     if (get().project?.id === project.id && get().selectedClipId === clip.id) {
       await get().ensureReframe(clip.id)
     }
@@ -513,7 +539,14 @@ export const useStore = create<AppState>((set, get) => ({
     // Only replace the transcript: clip edits in flight must not be clobbered.
     const current = get().project
     if (current?.id === updated.id) {
-      set({ project: { ...current, transcript: updated.transcript } })
+      const nextProject = {
+        ...current,
+        transcript: updated.transcript,
+        clips: current.clips.map((clip) => ({
+          ...clip, export: updated.clips.find((saved) => saved.id === clip.id)?.export
+        }))
+      }
+      set({ project: nextProject, exports: persistedExports(nextProject) })
     }
   },
 
@@ -526,6 +559,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (!dir) return
       set({ exportDir: dir })
     }
+    const previous = get().exports[clipId]
     set({ exports: { ...get().exports, [clipId]: { status: 'exporting', progress: 0 } } })
     try {
       const result = await window.cutawan.exportClip(project.id, { clipId, outputDir: dir })
@@ -543,10 +577,20 @@ export const useStore = create<AppState>((set, get) => ({
           }
         }
       })
+      const current = get().project
+      if (current?.id === project.id) {
+        set({ project: {
+          ...current,
+          clips: current.clips.map((clip) => clip.id === clipId ? { ...clip, export: result.exportState } : clip)
+        } })
+      }
     } catch (err) {
       const message = err instanceof Error ? cleanIpcError(err.message) : String(err)
       if (message.includes('Export cancelled')) {
-        get().clearExport(clipId)
+        const exports = { ...get().exports }
+        if (previous) exports[clipId] = previous
+        else delete exports[clipId]
+        set({ exports })
         return
       }
       set({
@@ -568,7 +612,7 @@ export const useStore = create<AppState>((set, get) => ({
     // The clip grid's "Export all" means the AI clips. A full-video edit is
     // exported deliberately from its own editor, never swept up here.
     for (const clip of highlightClips(project)) {
-      const status = get().exports[clip.id]?.status
+      const status = get().exports[clip.id]?.status ?? clip.export?.status
       if (status === 'exporting' || status === 'done') continue
       await get().exportClip(clip.id)
       // The folder picker was dismissed — don't re-prompt for every clip.
@@ -580,11 +624,30 @@ export const useStore = create<AppState>((set, get) => ({
     const dir = await window.cutawan.selectDirectory()
     if (dir) set({ exportDir: dir })
   },
+  exportClipInfo: async () => {
+    const project = get().project
+    if (!project) return null
+    let dir = get().exportDir
+    if (!dir) {
+      dir = await window.cutawan.selectDirectory()
+      if (!dir) return null
+      set({ exportDir: dir })
+    }
+    return window.cutawan.exportClipInfo(project.id, dir)
+  },
 
-  clearExport: (clipId) => {
+
+  clearExport: async (clipId) => {
+    const project = get().project
+    if (!project) return
+    const updated = await window.cutawan.clearExport(project.id, clipId)
     const exports = { ...get().exports }
     delete exports[clipId]
-    set({ exports })
+    const current = get().project
+    set({
+      exports,
+      project: current?.id === updated.id ? { ...current, clips: updated.clips } : current
+    })
   },
 
   addFonts: async () => {

@@ -9,6 +9,7 @@ import type {
   BackgroundReframeEvent,
   ExportProgress,
   ExportResult,
+  ClipInfoExportResult,
   GpuEncoderStatus,
   ImportProgress,
   PipelineProgress,
@@ -46,6 +47,8 @@ const api = {
   listProjects: (): Promise<ProjectSummary[]> => ipcRenderer.invoke('project:list'),
   loadProject: (id: string): Promise<Project> => ipcRenderer.invoke('project:load', id),
   deleteProject: (id: string): Promise<void> => ipcRenderer.invoke('project:delete', id),
+  exportClipInfo: (projectId: string, outputDir: string): Promise<ClipInfoExportResult> =>
+    ipcRenderer.invoke('project:exportClipInfo', projectId, outputDir),
   renameProject: (id: string, name: string): Promise<Project> => ipcRenderer.invoke('project:rename', id, name),
   relinkVideo: (projectId: string): Promise<Project> =>
     ipcRenderer.invoke('project:relinkVideo', projectId),
@@ -64,6 +67,8 @@ const api = {
   exportClip: (projectId: string, opts: ExportOptions): Promise<ExportResult> =>
     ipcRenderer.invoke('clip:export', projectId, opts),
   cancelExport: (clipId: string): Promise<void> => ipcRenderer.invoke('clip:cancelExport', clipId),
+  clearExport: (projectId: string, clipId: string): Promise<Project> =>
+    ipcRenderer.invoke('clip:clearExport', projectId, clipId),
   generateCaption: (projectId: string, clipId: string): Promise<Project> =>
     ipcRenderer.invoke('clip:generateCaption', projectId, clipId),
 

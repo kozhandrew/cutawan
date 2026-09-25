@@ -9,6 +9,7 @@ import {
   FolderOpen,
   FolderCog,
   RefreshCw,
+  FileText,
   Sparkles,
   X
 } from 'lucide-react'
@@ -28,6 +29,8 @@ export default function ClipsScreen(): React.JSX.Element {
   const exportDir = useStore((s) => s.exportDir)
   const chooseExportDir = useStore((s) => s.chooseExportDir)
   const goHome = useStore((s) => s.goHome)
+  const exportClipInfo = useStore((s) => s.exportClipInfo)
+  const [metadataBusy, setMetadataBusy] = useState(false)
   const [exportingAll, setExportingAll] = useState(false)
 
   if (!project) return <div />
@@ -72,6 +75,23 @@ export default function ClipsScreen(): React.JSX.Element {
               className="flex items-center gap-2 rounded-xl border border-surface-600 px-3 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-surface-800"
             >
               <FolderCog size={15} />
+            </button>
+            <button
+              onClick={async () => {
+                setMetadataBusy(true)
+                try {
+                  const result = await exportClipInfo()
+                  if (result) await window.cutawan.showItemInFolder(result.markdownPath)
+                } finally {
+                  setMetadataBusy(false)
+                }
+              }}
+              disabled={metadataBusy}
+              title="Write Markdown and CSV with the detected title, hook, summary, hashtags, score and source timestamps"
+              className="flex items-center gap-2 rounded-xl border border-surface-600 px-3 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-surface-800 disabled:opacity-60"
+            >
+              {metadataBusy ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />}
+              Export clip info
             </button>
             <button
               onClick={async () => {
@@ -135,6 +155,7 @@ function ClipCard({ clip, rank }: { clip: Clip; rank: number }): React.JSX.Eleme
   const openEditor = useStore((s) => s.openEditor)
   const exportClip = useStore((s) => s.exportClip)
   const cancelExport = useStore((s) => s.cancelExport)
+  const clearExport = useStore((s) => s.clearExport)
   const exports = useStore((s) => s.exports)
   const entry = exports[clip.id]
   const framing = useStore((s) => s.backgroundReframing[clip.id] === true)
@@ -197,6 +218,7 @@ function ClipCard({ clip, rank }: { clip: Clip; rank: number }): React.JSX.Eleme
             status={entry?.status}
             progress={entry?.progress ?? 0}
             outputPath={entry?.outputPath}
+            onClear={() => void clearExport(clip.id)}
             error={entry?.error}
             bytes={entry?.bytes}
             downscaled={entry?.downscaled}
@@ -217,9 +239,10 @@ export function ExportButton({
   bytes,
   downscaled,
   onExport,
-  onCancel
+  onCancel,
+  onClear
 }: {
-  status?: 'exporting' | 'done' | 'error'
+  status?: 'exporting' | 'done' | 'stale' | 'error'
   progress: number
   outputPath?: string
   error?: string
@@ -227,6 +250,7 @@ export function ExportButton({
   downscaled?: boolean
   onExport: () => void
   onCancel: () => void
+  onClear?: () => void
 }): React.JSX.Element {
   if (status === 'exporting') {
     return (
@@ -244,6 +268,18 @@ export function ExportButton({
         >
           <X size={13} />
         </button>
+      </div>
+    )
+  }
+  if (status === 'stale') {
+    return (
+      <div className="flex flex-1 gap-1.5">
+        <button onClick={onExport} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-amber-400/15 px-3 py-2 text-xs font-medium text-amber-300 transition hover:bg-amber-400/25">
+          <RefreshCw size={13} /> Re-export
+        </button>
+        {onClear && <button onClick={onClear} title="Clear export state (keeps the MP4)" className="rounded-lg border border-surface-600 px-2 text-zinc-400 transition hover:bg-surface-800 hover:text-zinc-200">
+          <X size={13} />
+        </button>}
       </div>
     )
   }

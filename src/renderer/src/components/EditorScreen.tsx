@@ -56,6 +56,7 @@ export default function EditorScreen(): React.JSX.Element {
   const updateClipLocal = useStore((s) => s.updateClipLocal)
   const exportClip = useStore((s) => s.exportClip)
   const cancelExport = useStore((s) => s.cancelExport)
+  const clearExport = useStore((s) => s.clearExport)
   const exports = useStore((s) => s.exports)
   const customFonts = useStore((s) => s.customFonts)
   const brandColors = useStore((s) => s.settings?.branding.colors)
@@ -585,7 +586,9 @@ export default function EditorScreen(): React.JSX.Element {
               downscaled={entry?.downscaled}
               onExport={() => void exportClip(clip.id)}
               onCancel={() => void cancelExport(clip.id)}
+              onClear={() => void clearExport(clip.id)}
             />
+
           </div>
           {entry?.status === 'done' && entry.downscaled && !capExceeded && (
             <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">

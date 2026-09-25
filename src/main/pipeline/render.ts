@@ -618,6 +618,23 @@ export interface RenderResult {
   sizePlan: UploadEncodePlan | null
 }
 
+async function replaceValidatedExport(temporary: string, outputPath: string): Promise<void> {
+  if (!existsSync(outputPath)) {
+    await rename(temporary, outputPath)
+    return
+  }
+  // Keep the previous delivery recoverable if the final replacement fails.
+  const backup = outputPath + '.previous-' + randomUUID() + '.mp4'
+  await rename(outputPath, backup)
+  try {
+    await rename(temporary, outputPath)
+  } catch (error) {
+    await rename(backup, outputPath).catch(() => undefined)
+    throw error
+  }
+  await rm(backup, { force: true }).catch(() => undefined)
+}
+
 export function renderClip(job: RenderJob): Promise<RenderResult> {
   return mediaJobs.run(async () => {
     const temporary = `${job.outputPath}.partial-${randomUUID()}.mp4`
@@ -629,7 +646,7 @@ export function renderClip(job: RenderJob): Promise<RenderResult> {
         '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-'], { signal: job.signal,
         onProgress: seconds => job.onProgress?.(.95 + .05 * Math.min(1, seconds / Math.max(.1, job.clip.edit.end - job.clip.edit.start))) }))
       job.signal?.throwIfAborted()
-      await rename(temporary, job.outputPath)
+      await replaceValidatedExport(temporary, job.outputPath)
       job.onProgress?.(1)
       return { ...result, outputPath: job.outputPath }
     } finally {
