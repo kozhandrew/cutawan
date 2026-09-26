@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Upload,
   Captions,
@@ -19,6 +19,7 @@ import {
 import { useStore } from '../store'
 import { formatDuration, formatBytes } from '../lib/format'
 import MissingSourceBanner from './MissingSourceBanner'
+import ClipGenerationSelector from './ClipGenerationSelector'
 import DiscoverySummary from './DiscoverySummary'
 import { EditorialRankingSummary } from './EditorialSummary'
 import { SOURCE_DISCOVERY_BUDGET } from '@shared/sourceAnalysis'
@@ -286,21 +287,36 @@ function SetupPanel(): React.JSX.Element {
   const settings = useStore((s) => s.settings)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const pipelineError = useStore((s) => s.pipelineError)
+  const activeGeneration = project.clipGenerations?.find((generation) => generation.id === project.activeClipGenerationId)
+    ?? project.clipGenerations?.[project.clipGenerations.length - 1]
   const [mode, setMode] = useState<ProjectMode>(project.mode ?? 'clips')
   const [captionAspect, setCaptionAspect] = useState<AspectRatio>('9:16')
   // Both off by default: speaker tracking costs minutes of local CPU, and auto
   // zoom is a taste call rather than something to apply to a whole video unasked.
   const [followSpeaker, setFollowSpeaker] = useState(false)
   const [captionZoom, setCaptionZoom] = useState(false)
-  const [prompt, setPrompt] = useState(project.prompt)
-  const [clipLength, setClipLength] = useState<ClipLengthPreference>('auto')
-  const [videoType, setVideoType] = useState<VideoType>(project.videoType ?? 'auto')
+  const [prompt, setPrompt] = useState(activeGeneration?.options.prompt ?? project.prompt)
+  const [clipLength, setClipLength] = useState<ClipLengthPreference>(activeGeneration?.options.clipLength ?? 'auto')
+  const [videoType, setVideoType] = useState<VideoType>(activeGeneration?.options.videoType ?? project.videoType ?? 'auto')
   // Off by default: B-roll costs extra LLM/image calls and splits opinion.
-  const [broll, setBroll] = useState(false)
+  const [broll, setBroll] = useState(activeGeneration?.options.broll ?? false)
   // Off by default: hook-first trimming rewrites clip starts with an extra LLM pass.
-  const [hookFirst, setHookFirst] = useState(false)
-  const [visualDiscovery, setVisualDiscovery] = useState(project.visualDiscovery ?? false)
-  const [editorialRanking, setEditorialRanking] = useState(project.rankingEnabled ?? false)
+  const [hookFirst, setHookFirst] = useState(activeGeneration?.options.hookFirst ?? false)
+  const [visualDiscovery, setVisualDiscovery] = useState(activeGeneration?.options.visualDiscovery ?? project.visualDiscovery ?? false)
+  const [editorialRanking, setEditorialRanking] = useState(activeGeneration?.options.editorialRanking ?? project.rankingEnabled ?? false)
+
+  useEffect(() => {
+    if (!activeGeneration) return
+    const options = activeGeneration.options
+    setMode('clips')
+    setPrompt(options.prompt)
+    setClipLength(options.clipLength)
+    setVideoType(options.videoType)
+    setBroll(options.broll)
+    setHookFirst(options.hookFirst)
+    setVisualDiscovery(options.visualDiscovery === true)
+    setEditorialRanking(options.editorialRanking === true)
+  }, [activeGeneration?.id, activeGeneration?.updatedAt])
 
   // Captioning an already-transcribed video makes no API calls, so it does not
   // need a key; clip finding always does.
@@ -322,6 +338,7 @@ function SetupPanel(): React.JSX.Element {
               ? 'Tell the AI what to look for, then generate clips.'
               : 'No clip finding — the whole video, cropped vertical and captioned.'}
           </p>
+          {mode === 'clips' && <div className="mt-3"><ClipGenerationSelector /></div>}
         </div>
         {mode === 'clips' && highlights.length > 0 && (
           <button

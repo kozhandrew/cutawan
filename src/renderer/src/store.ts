@@ -141,6 +141,8 @@ interface AppState {
   analyze: (options: AnalyzeOptions) => Promise<void>
   captionWholeVideo: (options: CaptionVideoOptions) => Promise<void>
   cancelAnalyze: () => Promise<void>
+  activateClipGeneration: (generationId: string) => Promise<void>
+  deleteClipGeneration: (generationId: string) => Promise<void>
   openEditor: (clipId: string) => void
   closeEditor: () => void
   updateClip: (clip: Clip) => Promise<void>
@@ -226,7 +228,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (event.state === 'running') running[event.clipId] = true
       else delete running[event.clipId]
       const current = get().project
-      if (event.state === 'done' && current?.id === event.projectId) {
+      if (event.state === 'done' && current?.id === event.projectId && current.clips.some((clip) => clip.id === event.clipId)) {
         // Graft only what the analysis owns: edits made while it ran stay.
         set({
           backgroundReframing: running,
@@ -404,6 +406,42 @@ export const useStore = create<AppState>((set, get) => ({
   cancelAnalyze: async () => {
     const project = get().project
     if (project) await window.cutawan.cancelAnalyze(project.id)
+  },
+
+  activateClipGeneration: async (generationId) => {
+    const project = get().project
+    if (!project || project.activeClipGenerationId === generationId) return
+    const updated = await window.cutawan.activateClipGeneration(project.id, generationId)
+    clearHistory()
+    queuedReframes.clear()
+    set({
+      project: updated,
+      exports: persistedExports(updated),
+      selectedClipId: null,
+      screen: get().screen === 'editor' ? 'clips' : get().screen,
+      backgroundReframing: {},
+      reframeBusy: {},
+      reframeError: {}
+    })
+    await get().refreshProjects()
+  },
+
+  deleteClipGeneration: async (generationId) => {
+    const project = get().project
+    if (!project) return
+    const updated = await window.cutawan.deleteClipGeneration(project.id, generationId)
+    clearHistory()
+    queuedReframes.clear()
+    set({
+      project: updated,
+      exports: persistedExports(updated),
+      selectedClipId: null,
+      screen: 'clips',
+      backgroundReframing: {},
+      reframeBusy: {},
+      reframeError: {}
+    })
+    await get().refreshProjects()
   },
 
   openEditor: (clipId) => {

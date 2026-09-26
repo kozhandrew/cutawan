@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Project } from '@shared/types'
@@ -49,4 +49,30 @@ it('checkpoints an explicit empty transcript for visual discovery without invoki
   }, () => {})
   expect(transcript).toMatchObject({ durationSec: 20, segments: [], speech: [] })
   expect((await loadProject(project.id)).transcript).toEqual(transcript)
+})
+
+it('migrates a legacy clip list to a saved first generation without losing its export path', async () => {
+  const project: Project = {
+    id: 'legacy-generation', createdAt: 1, updatedAt: 2, name: 'Legacy clips',
+    video: { path: join(mock.root, 'legacy.mp4'), fileName: 'legacy.mp4', durationSec: 20,
+      width: 640, height: 360, fps: 25, sizeBytes: 0, hasAudio: true },
+    transcript: null, prompt: 'Original instructions', videoType: 'podcast',
+    clips: [{
+      id: 'legacy-clip', title: 'Clip', hook: '', summary: '', hashtags: [], viralityScore: 80, viralityReason: '',
+      visualSummary: null, thumbnailPath: null, focusTrack: null, broll: [], suggestedStart: 0, suggestedEnd: 10,
+      export: { status: 'done', outputPath: '/outside/keep.mp4', bytes: 10, exportedAt: 2 },
+      edit: { start: 0, end: 10, aspect: '9:16', captionsEnabled: true }
+    }]
+  } as unknown as Project
+  await mkdir(projectDir(project.id), { recursive: true })
+  await writeFile(join(projectDir(project.id), 'project.json'), JSON.stringify(project), 'utf8')
+
+  const loaded = await loadProject(project.id)
+  expect(loaded.clipGenerations).toHaveLength(1)
+  expect(loaded.clipGenerations?.[0].clips[0].export?.outputPath).toBe('/outside/keep.mp4')
+
+  await updateProject(project.id, () => {})
+  const persisted = await loadProject(project.id)
+  expect(persisted.activeClipGenerationId).toBe(persisted.clipGenerations?.[0].id)
+  expect(persisted.clipGenerations?.[0].clips[0].export?.outputPath).toBe('/outside/keep.mp4')
 })

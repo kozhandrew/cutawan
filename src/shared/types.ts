@@ -255,6 +255,17 @@ export interface LayoutShot {
   review?: { status: 'checked' | 'needs-review'; reason: string }
 }
 
+/** A complete, editable result of one successful AI clip-finding run. */
+export interface ClipGeneration {
+  id: string
+  createdAt: number
+  updatedAt: number
+  options: AnalyzeOptions
+  clips: Clip[]
+  discoveryReport?: SourceDiscoveryReport
+  editorialRanking?: EditorialRankingReport
+}
+
 export interface Project {
   /** Increments on relink so in-flight analysis of an older source cannot land. */
   sourceRevision?: number
@@ -264,7 +275,11 @@ export interface Project {
   name: string
   video: VideoInfo
   transcript: Transcript | null
+  /** Backwards-compatible mirror of the currently active clip generation. */
   clips: Clip[]
+  /** Successful clip-finding runs for this source; absent on older projects. */
+  clipGenerations?: ClipGeneration[]
+  activeClipGenerationId?: string
   /** Custom instructions the user gave the AI, if any. */
   prompt: string
   /** Source format chosen at setup; steers layout and face-tracking behaviour. */

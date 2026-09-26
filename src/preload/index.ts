@@ -47,6 +47,10 @@ const api = {
     ipcRenderer.invoke('project:cancelAnalyze', projectId),
   listProjects: (): Promise<ProjectSummary[]> => ipcRenderer.invoke('project:list'),
   loadProject: (id: string): Promise<Project> => ipcRenderer.invoke('project:load', id),
+  activateClipGeneration: (projectId: string, generationId: string): Promise<Project> =>
+    ipcRenderer.invoke('project:activateClipGeneration', projectId, generationId),
+  deleteClipGeneration: (projectId: string, generationId: string): Promise<Project> =>
+    ipcRenderer.invoke('project:deleteClipGeneration', projectId, generationId),
   deleteProject: (id: string): Promise<void> => ipcRenderer.invoke('project:delete', id),
   exportClipInfo: (projectId: string, outputDir: string): Promise<ClipInfoExportResult> =>
     ipcRenderer.invoke('project:exportClipInfo', projectId, outputDir),

@@ -3,11 +3,12 @@ import { cancelLocalWhisperInstall, installLocalWhisper, type LocalWhisperModel 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
-import { basename, extname, join } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, sep } from 'node:path'
 import type {
   AnalyzeOptions,
   CaptionVideoOptions,
   Clip,
+  ClipGeneration,
   ExportOptions,
   Project,
   SettingsUpdate
@@ -35,7 +36,8 @@ import { clipInfoCsv, clipInfoMarkdown } from './clipMetadata'
 import { UpdateActivity } from './updateActivity'
 import { isMediaPathAllowed } from './mediaAccess'
 import { sanitizeFileName, uniqueOutputPath } from './exportPath'
-import { deleteProject, listProjects, loadProject, updateProject } from './projects'
+import { deleteProject, listProjects, loadProject, projectDir, updateProject } from './projects'
+import { activateClipGeneration, deleteClipGeneration } from '@shared/clipGenerations'
 import {
   getAnalysisCredential,
   getBrandingSettings,
@@ -52,6 +54,33 @@ const runningExports = new Map<string, AbortController>()
 export const ANALYSIS_CANCELLED_MESSAGE = 'Analysis cancelled'
 export const EXPORT_CANCELLED_MESSAGE = 'Export cancelled'
 
+function generationAssetPaths(generation: ClipGeneration): string[] {
+  return generation.clips.flatMap((clip) => [
+    clip.thumbnailPath,
+    ...clip.broll.map((item) => item.imagePath)
+  ]).filter((path): path is string => Boolean(path))
+}
+
+function isProjectGeneratedAsset(projectId: string, candidate: string): boolean {
+  return ['thumbs', 'broll'].some((folder) => {
+    const asset = relative(join(projectDir(projectId), folder), candidate)
+    return asset !== '' && asset !== '..' && !asset.startsWith(`..${sep}`) && !isAbsolute(asset)
+  })
+}
+
+async function removeUnreferencedGenerationAssets(
+  projectId: string, removed: ClipGeneration, project: Project
+): Promise<void> {
+  const referenced = new Set(
+    (project.clipGenerations ?? []).flatMap(generationAssetPaths)
+  )
+  await Promise.all(generationAssetPaths(removed).map(async (asset) => {
+    if (!referenced.has(asset) && isProjectGeneratedAsset(projectId, asset)) {
+      // A locked thumbnail must not make an already-persisted generation delete fail.
+      await rm(asset, { force: true }).catch(() => undefined)
+    }
+  }))
+}
 
 /** How far apart durations may be for a relinked file to count as the same video. */
 const RELINK_DURATION_TOLERANCE_SEC = 2
@@ -184,6 +213,28 @@ export function registerIpcHandlers(): void {
 
   handle('project:list', async () => listProjects())
   handle('project:load', async (_e, id: string) => loadProject(id))
+  handle('project:activateClipGeneration', async (event, projectId: string, generationId: string) => {
+    cancelBackgroundReframes(projectId)
+    const project = await updateProject(projectId, (current) => {
+      activateClipGeneration(current, generationId)
+    })
+    void startBackgroundReframes(project, (state) => {
+      if (!event.sender.isDestroyed()) event.sender.send('clip:backgroundReframe', state)
+    })
+    return project
+  })
+  handle('project:deleteClipGeneration', async (event, projectId: string, generationId: string) => {
+    cancelBackgroundReframes(projectId)
+    let removed: ClipGeneration | undefined
+    const project = await updateProject(projectId, (current) => {
+      removed = deleteClipGeneration(current, generationId)
+    })
+    if (removed) await removeUnreferencedGenerationAssets(projectId, removed, project)
+    void startBackgroundReframes(project, (state) => {
+      if (!event.sender.isDestroyed()) event.sender.send('clip:backgroundReframe', state)
+    })
+    return project
+  })
   handle('project:exportClipInfo', async (_e, projectId: string, outputDir: string) => {
     const project = await loadProject(projectId)
     const clips = highlightClips(project)

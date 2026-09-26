@@ -31,6 +31,7 @@ import {
 } from './ytdlp'
 import { getAnalysisCredential, getImportPreferences, getModelPreferences } from '../settings'
 import { projectDir, saveProject, updateProject } from '../projects'
+import { appendClipGeneration } from '@shared/clipGenerations'
 
 export async function createProject(videoPath: string): Promise<Project> {
   const video = await probeVideo(videoPath)
@@ -181,14 +182,6 @@ export async function analyzeProject(
       discovery.admittedCandidateCount = visualClips.length
       discovery.boundaryRejectedCandidateCount = discovery.candidates.length - visualClips.length
     }
-    // Save even an empty or incomplete scan: omissions must remain measurable.
-    await updateProject(project.id, p => {
-      if (p.video.path !== project.video.path || (p.sourceRevision ?? 0) !== (project.sourceRevision ?? 0)) {
-        throw new Error('The source changed during analysis. Generate clips again for the current video.')
-      }
-      p.visualDiscovery = options.visualDiscovery === true
-      p.discoveryReport = discovery
-    })
     onProgress({ stage: 'analyze', progress: 0.6, message: 'Finding spoken moments…' })
     let clips = transcript.segments.length ? await timed('highlights', () => detectHighlights(
       apiKey,
@@ -250,6 +243,7 @@ export async function analyzeProject(
     if (!clips.length) throw new Error('The candidate clips did not form complete, self-contained stories. Try a longer clip length or a different source.')
     clips.sort((a, b) => b.viralityScore - a.viralityScore)
     // Freeze the old policy on this exact surviving pool before the independent review.
+    let editorialRanking: typeof project.editorialRanking = undefined
     const baselineClips = dedupeClips(clips)
     if (options.editorialRanking === true) {
       const ranked = await timed('editorial-ranking', () => rankEditorialCandidates({
@@ -259,36 +253,14 @@ export async function analyzeProject(
         onProgress: message => onProgress({ stage: 'analyze', progress: .8, message })
       }))
       ranked.report.generationId = generationId
-      // Rejected/missing reviews remain in the report, including runs with no recommendation.
-      await updateProject(project.id, p => {
-        if (p.video.path !== project.video.path || (p.sourceRevision ?? 0) !== (project.sourceRevision ?? 0)) {
-          throw new Error('The source changed during analysis. Generate clips again for the current video.')
-        }
-        p.rankingEnabled = true
-        p.editorialRanking = ranked.report
-      })
+      editorialRanking = ranked.report
       clips = ranked.clips
-      if (!clips.length) throw new Error('Editorial review found incomplete or misleading selections. Try a longer clip length or different instructions; the review report has been saved.')
+      if (!clips.length) throw new Error('Editorial review found incomplete or misleading selections. Try a longer clip length or different instructions; the active clip generation was kept unchanged.')
     } else clips = baselineClips
 
     // Layouts for the top clips run in the background once the list is on
     // screen (see backgroundReframe.ts); every clip starts pending.
     for (const clip of clips) clip.reframeStatus = 'pending'
-    project.clips = clips
-    project.prompt = options.prompt
-    project.videoType = options.videoType
-    await updateProject(project.id, (p) => {
-      if (p.video.path !== project.video.path || (p.sourceRevision ?? 0) !== (project.sourceRevision ?? 0)) {
-        throw new Error('The source changed during analysis. Generate clips again for the current video.')
-      }
-      p.clips = clips
-      p.prompt = options.prompt
-      p.videoType = options.videoType
-      p.clipsGenerationId = generationId
-      p.rankingEnabled = options.editorialRanking === true
-      if (!p.rankingEnabled) delete p.editorialRanking
-    })
-
     if (options.broll) {
       onProgress({ stage: 'broll', progress: 0.82, message: 'Finding B-roll images…' })
       let brolled = 0
@@ -309,13 +281,6 @@ export async function analyzeProject(
           message: 'Finding B-roll images…'
         })
       }))
-      await updateProject(project.id, (p) => {
-        if (p.video.path !== project.video.path || (p.sourceRevision ?? 0) !== (project.sourceRevision ?? 0)) return
-        for (const current of p.clips) {
-          const result = clips.find(c => c.id === current.id)
-          if (result) current.broll = result.broll
-        }
-      })
     }
 
     onProgress({ stage: 'thumbnails', progress: 0.9, message: 'Creating thumbnails…' })
@@ -338,15 +303,19 @@ export async function analyzeProject(
       })
     }), { clips: clips.length })
 
-    // Final save returns the freshest merged copy (clips from this run plus
-    // anything — like a rename — that changed on disk while it ran).
+    // A failed or cancelled analysis never replaces the active generation.
+    // Only this final save creates a new editable generation from the completed run.
     const persisted = await updateProject(project.id, (p) => {
-      if (p.video.path !== project.video.path || (p.sourceRevision ?? 0) !== (project.sourceRevision ?? 0)) return
-      p.clips = p.clips.map(current => {
-        const result = clips.find(c => c.id === current.id)
-        // Layouts were checkpointed individually. Never replay a stale pending
-        // result over analysis that an editor/export completed in the meantime.
-        return result ? { ...current, thumbnailPath: result.thumbnailPath } : current
+      if (p.video.path !== project.video.path || (p.sourceRevision ?? 0) !== (project.sourceRevision ?? 0)) {
+        throw new Error('The source changed during analysis. Generate clips again for the current video.')
+      }
+      appendClipGeneration(p, {
+        id: generationId,
+        createdAt: Date.now(),
+        options: { ...options },
+        clips,
+        discoveryReport: discovery,
+        editorialRanking
       })
     })
     onProgress({ stage: 'done', progress: 1, message: 'Done' })

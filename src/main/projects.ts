@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile, readdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Project, ProjectSummary } from '@shared/types'
+import { ensureClipGenerationHistory, syncActiveClipGeneration } from '@shared/clipGenerations'
 import { highlightClips } from '@shared/wholeVideo'
 import { allowMediaPath } from './mediaAccess'
 
@@ -45,6 +46,7 @@ async function persistProject(project: Project): Promise<void> {
   const dir = projectDir(project.id)
   await mkdir(dir, { recursive: true })
   project.updatedAt = Date.now()
+  syncActiveClipGeneration(project)
   allowMediaPath(project.video.path)
   // sourceMissing is transient state, recomputed on every load.
   const { sourceMissing: _omit, ...persisted } = project
@@ -104,6 +106,7 @@ export async function loadProject(id: string): Promise<Project> {
     clip.broll ??= []
     clip.visualSummary ??= null
   }
+  ensureClipGenerationHistory(project)
   project.sourceMissing = !existsSync(project.video.path)
   allowMediaPath(project.video.path)
   return project

@@ -14,6 +14,7 @@ import {
   X
 } from 'lucide-react'
 import { useStore } from '../store'
+import ClipGenerationSelector from './ClipGenerationSelector'
 import { formatBytes, formatDuration } from '../lib/format'
 import { EditorialExplanation, EditorialRankingSummary, EditorialScore } from './EditorialSummary'
 import MissingSourceBanner from './MissingSourceBanner'
@@ -60,6 +61,7 @@ export default function ClipsScreen(): React.JSX.Element {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <ClipGenerationSelector />
             <button
               onClick={goHome}
               data-testid="regenerate-button"

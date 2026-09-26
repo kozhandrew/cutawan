@@ -66,15 +66,15 @@ it('keeps the legacy ranking available without making editorial review calls', a
   expect(result.rankingEnabled).toBe(false)
 })
 
-it('persists the review report and previous edits when every new candidate is rejected', async () => {
+it('keeps the active version unchanged when editorial review rejects every new candidate', async () => {
   const [previous] = await mocks.highlights(); project.clips = [previous]
   project.clipsGenerationId = 'previous-generation'
   mocks.rank.mockResolvedValue({ clips: [], report: { version: 1, candidateCount: 1, rejectedCount: 1 } })
   await expect(analyzeProject(project, options, () => {})).rejects.toThrow('incomplete or misleading')
   expect(project.clips).toEqual([previous])
-  expect(project.editorialRanking?.rejectedCount).toBe(1)
+  expect(project.editorialRanking).toBeUndefined()
   expect(project.clipsGenerationId).toBe('previous-generation')
-  expect(project.editorialRanking?.generationId).not.toBe('previous-generation')
+  expect(mocks.save).not.toHaveBeenCalled()
 })
 
 it('uses editorial selection order instead of re-sorting by legacy scores', async () => {
@@ -107,15 +107,15 @@ it('discovers a silent demonstration even when the transcript has no candidates'
   expect(result.discoveryReport?.generationId).toBe(result.clipsGenerationId)
 })
 
-it('persists unsuccessful scan coverage and preserves previous clips when no new moments exist', async () => {
+it('keeps the active version unchanged when visual discovery finds no new moments', async () => {
   const [previous] = await mocks.highlights()
   project.clips = [previous]
   mocks.transcript.mockResolvedValue({ language: 'en', durationSec: 100, segments: [] })
   mocks.discovery.mockResolvedValue({ version: 1, status: 'failed', candidates: [] })
   await expect(analyzeProject(project, { ...options, visualDiscovery: true }, () => {})).rejects.toThrow('visual scan failed')
-  expect(project.discoveryReport?.status).toBe('failed')
+  expect(project.discoveryReport).toBeUndefined()
   expect(project.clips).toEqual([previous])
-  expect(project.discoveryReport?.generationId).not.toBe(project.clipsGenerationId)
+  expect(mocks.save).not.toHaveBeenCalled()
 })
 
 it('does not silently swallow a discovery budget or cancellation failure', async () => {
