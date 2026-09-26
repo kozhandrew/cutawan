@@ -1,4 +1,6 @@
 import type { SubscriptionSettings } from './subscription'
+import type { SourceDiscoveryReport } from './sourceAnalysis'
+import type { EditorialAssessment, EditorialRankingReport } from './editorialRanking'
 /** Shared domain types used across main, preload and renderer. */
 
 export interface VideoInfo {
@@ -175,6 +177,9 @@ export interface Clip {
    * existed, which are all AI highlights.
    */
   origin?: ClipOrigin
+  /** Evidence route for this suggestion; not a quality or popularity guarantee. */
+  discovery?: { origin: 'transcript' | 'visual'; evidenceTimes?: number[] }
+  editorial?: EditorialAssessment
   /** AI suggested boundaries (absolute seconds in the source video). */
   suggestedStart: number
   suggestedEnd: number
@@ -264,6 +269,13 @@ export interface Project {
   prompt: string
   /** Source format chosen at setup; steers layout and face-tracking behaviour. */
   videoType: VideoType
+  /** Opt-in source-wide sampled visual discovery used for this generation. */
+  visualDiscovery?: boolean
+  discoveryReport?: SourceDiscoveryReport
+  rankingEnabled?: boolean
+  /** Identifies the generation that produced the current highlight list. */
+  clipsGenerationId?: string
+  editorialRanking?: EditorialRankingReport
   /** Flow that last ran on this project; absent on clip-finding projects. */
   mode?: ProjectMode
   /**
@@ -314,6 +326,10 @@ export interface AnalyzeOptions {
   hookFirst: boolean
   /** Source format; steers per-clip layout and whether face tracking runs. */
   videoType: VideoType
+  /** Additional bounded source-frame analysis through the configured provider. */
+  visualDiscovery?: boolean
+  /** Explicit opt-in while provider behavior and quality are being evaluated. */
+  editorialRanking?: boolean
 }
 
 export type ClipLengthPreference = 'auto' | 'short' | 'medium' | 'long'
