@@ -31,4 +31,12 @@ describe('uniqueOutputPath', () => {
       join('/out', 'My Clip (3).mp4')
     )
   })
+
+  it('uses the newly selected folder instead of a previous export path', () => {
+    const previousOutputPath = join('/first-export', 'My Clip.mp4')
+    const nextOutputPath = uniqueOutputPath('/second-export', 'My Clip', (p) => p === previousOutputPath)
+
+    expect(nextOutputPath).toBe(join('/second-export', 'My Clip.mp4'))
+    expect(nextOutputPath).not.toBe(previousOutputPath)
+  })
 })

@@ -293,9 +293,9 @@ export function registerIpcHandlers(): void {
     if (runningExports.has(clip.id)) throw new Error('This clip is already exporting.')
 
     const suffix = clip.edit.aspect === 'original' ? '' : ` (${clip.edit.aspect.replace(':', 'x')})`
-    const previousOutputPath = clip.export?.outputPath
-    const outputPath = previousOutputPath && existsSync(previousOutputPath)
-      ? previousOutputPath : uniqueOutputPath(opts.outputDir, `${sanitizeFileName(clip.title)}${suffix}`)
+    // Re-exports are new artifacts: always honour the destination picked in the
+    // current dialog and leave a previous successful MP4 untouched.
+    const outputPath = uniqueOutputPath(opts.outputDir, `${sanitizeFileName(clip.title)}${suffix}`)
     const prefs = getExportPreferences()
     const sizeTargetBytes = sizeTargetBytesFromMb(prefs.sizeTargetMb)
     const branding = getBrandingSettings()
