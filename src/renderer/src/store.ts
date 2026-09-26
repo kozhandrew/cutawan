@@ -15,6 +15,7 @@ import type {
   UpdateDownloadState
 } from '@shared/types'
 
+import type { ClipSettingsSelection } from '@shared/clipSettings'
 import { findWholeVideoClip, highlightClips, isWholeVideoClip } from '@shared/wholeVideo'
 import { mergeReframeResult, needsReframe } from '@shared/reframe'
 import { clearHistory, noteExternal, recordSave, redo as redoEdit, trackClip, undo as undoEdit } from '@shared/editHistory'
@@ -143,6 +144,7 @@ interface AppState {
   openEditor: (clipId: string) => void
   closeEditor: () => void
   updateClip: (clip: Clip) => Promise<void>
+  applyClipSettings: (sourceClipId: string, selection: ClipSettingsSelection) => Promise<void>
   /** Step the clip's own edits back or forward (see lib/editHistory.ts). */
   undo: (clipId: string) => Promise<void>
   redo: (clipId: string) => Promise<void>
@@ -450,6 +452,16 @@ export const useStore = create<AppState>((set, get) => ({
     if (get().project?.id === project.id && get().selectedClipId === clip.id) {
       await get().ensureReframe(clip.id)
     }
+  },
+
+  applyClipSettings: async (sourceClipId, selection) => {
+    const project = get().project
+    const source = project?.clips.find((clip) => clip.id === sourceClipId)
+    if (!project || !source) return
+    // Persist an in-progress local edit before it becomes the template.
+    await window.cutawan.updateClip(project.id, source)
+    const updated = await window.cutawan.applyClipSettings(project.id, sourceClipId, selection)
+    set({ project: updated, exports: persistedExports(updated) })
   },
 
   undo: async (clipId) => stepHistory(clipId, undoEdit),

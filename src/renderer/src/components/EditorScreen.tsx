@@ -31,6 +31,7 @@ import ScoreBadge from './ScoreBadge'
 import TranscriptEditor from './TranscriptEditor'
 import { ExportButton } from './ClipsScreen'
 import SizeTargetControls from './SizeTargetControls'
+import ApplyClipSettingsDialog from './ApplyClipSettingsDialog'
 import { CAPTION_STYLES, resolveCaptionStyle } from '@shared/captionStyles'
 import { formatBytes, formatTimecode } from '../lib/format'
 import type { AspectRatio, BrollItem, BrollMode, Clip, FramingMode, ReframeMode } from '@shared/types'
@@ -57,6 +58,7 @@ export default function EditorScreen(): React.JSX.Element {
   const exportClip = useStore((s) => s.exportClip)
   const cancelExport = useStore((s) => s.cancelExport)
   const clearExport = useStore((s) => s.clearExport)
+  const applySettingsToAll = useStore((s) => s.applyClipSettings)
   const exports = useStore((s) => s.exports)
   const customFonts = useStore((s) => s.customFonts)
   const brandColors = useStore((s) => s.settings?.branding.colors)
@@ -93,6 +95,7 @@ export default function EditorScreen(): React.JSX.Element {
     }
   }, [videoPath, sourceMissing, windowStart, windowEnd, timelineKey])
   const timeline = loadedTimeline?.key === timelineKey ? loadedTimeline.data : null
+  const [applySettingsOpen, setApplySettingsOpen] = useState(false)
 
   // Clips outside the pipeline's top tier arrive without speaker framing;
   // opening one is what triggers the analysis (see shared/reframe.ts).
@@ -171,6 +174,17 @@ export default function EditorScreen(): React.JSX.Element {
             <ScoreBadge score={clip.viralityScore} size="lg" />
           )}
         </div>
+
+        {project.clips.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setApplySettingsOpen(true)}
+            data-testid="apply-clip-settings"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-surface-600 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-surface-800"
+          >
+            <Copy size={13} /> Apply settings to other clips
+          </button>
+        )}
 
         {!wholeVideo && (
           <div className="rounded-xl border border-surface-700 bg-surface-850 px-3.5 py-3 text-xs leading-relaxed text-zinc-400">
@@ -613,6 +627,14 @@ export default function EditorScreen(): React.JSX.Element {
             <p className="mt-2 text-[11px] leading-relaxed text-red-400">{entry.error}</p>
           )}
         </div>
+        {applySettingsOpen && (
+          <ApplyClipSettingsDialog
+            sourceClip={clip}
+            targetCount={project.clips.length - 1}
+            onClose={() => setApplySettingsOpen(false)}
+            onApply={(selection) => applySettingsToAll(clip.id, selection)}
+          />
+        )}
       </aside>
     </div>
   )

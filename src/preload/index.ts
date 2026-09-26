@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { ClipSettingsSelection } from '@shared/clipSettings'
 import type {
   AnalyzeOptions,
   CaptionVideoOptions,
@@ -54,6 +55,8 @@ const api = {
     ipcRenderer.invoke('project:relinkVideo', projectId),
   updateClip: (projectId: string, clip: Clip): Promise<Project> =>
     ipcRenderer.invoke('project:updateClip', projectId, clip),
+  applyClipSettings: (projectId: string, sourceClipId: string, selection: ClipSettingsSelection): Promise<Project> =>
+    ipcRenderer.invoke('project:applyClipSettings', projectId, sourceClipId, selection),
   ensureReframe: (projectId: string, clipId: string, retryLayout = false): Promise<Project> =>
     ipcRenderer.invoke('clip:ensureReframe', projectId, clipId, retryLayout),
   updateTranscriptWord: (

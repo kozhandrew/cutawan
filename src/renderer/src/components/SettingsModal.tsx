@@ -31,6 +31,7 @@ import type {
   BrandVoiceSettings,
   EncoderPreference,
   ImportProgress,
+  OverlayRendererPreference,
   QualityPreference,
   WatermarkPosition
 } from '@shared/types'
@@ -67,6 +68,11 @@ const QUALITIES: Array<{ value: QualityPreference; label: string; hint: string }
   { value: 'draft', label: 'Draft', hint: 'Fastest' },
   { value: 'standard', label: 'Standard', hint: 'Balanced' },
   { value: 'high', label: 'High', hint: 'Best quality' }
+]
+
+const OVERLAY_RENDERERS: Array<{ value: OverlayRendererPreference; label: string; hint: string }> = [
+  { value: 'chromium', label: 'Exact Preview', hint: 'Chromium overlays match the editor' },
+  { value: 'ass', label: 'Compatibility', hint: 'Original ASS/libass renderer' }
 ]
 
 const WATERMARK_POSITIONS: Array<{ value: WatermarkPosition; label: string }> = [
@@ -394,6 +400,29 @@ export default function SettingsModal(): React.JSX.Element {
               >
                 <div className="text-xs font-medium">{q.label}</div>
                 <div className="mt-0.5 text-[10px] text-zinc-500">{q.hint}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <MonitorPlay size={15} className="text-accent-400" />
+            Overlay renderer
+          </label>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+            Exact Preview is the default. Compatibility keeps the original ASS/libass overlay path.
+          </p>
+          <div className="mt-2.5 grid grid-cols-2 gap-2">
+            {OVERLAY_RENDERERS.map((renderer) => (
+              <button
+                key={renderer.value}
+                data-testid={"export-overlay-renderer-" + renderer.value}
+                onClick={() => void saveSettings({ overlayRenderer: renderer.value })}
+                className={["rounded-xl border px-3 py-2.5 text-left transition", (settings?.overlayRenderer ?? "chromium") === renderer.value ? "border-white/30 bg-white/[0.07] text-zinc-100" : "border-surface-600 text-zinc-400 hover:bg-surface-800"].join(" ")}
+              >
+                <div className="text-xs font-medium">{renderer.label}</div>
+                <div className="mt-0.5 text-[10px] leading-relaxed text-zinc-500">{renderer.hint}</div>
               </button>
             ))}
           </div>

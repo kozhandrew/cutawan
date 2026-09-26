@@ -382,6 +382,8 @@ export interface ClipInfoExportResult {
 
 export type EncoderPreference = 'auto' | 'cpu' | 'gpu'
 export type QualityPreference = 'draft' | 'standard' | 'high'
+/** Chromium matches PreviewPlayer; ASS/libass keeps the original fast renderer. */
+export type OverlayRendererPreference = 'chromium' | 'ass'
 
 /** Corner where the branding watermark is composited. */
 export type WatermarkPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
@@ -540,6 +542,7 @@ export interface AppSettings {
   openaiBaseUrlFromEnv: boolean
   encoder: EncoderPreference
   quality: QualityPreference
+  overlayRenderer: OverlayRendererPreference
   /**
    * Hard file-size cap for exports, in megabytes. Null means ordinary
    * quality-targeted encoding (the quality tier above applies).
@@ -566,6 +569,7 @@ export interface SettingsUpdate {
   transcriptionBaseUrl?: string
   encoder?: EncoderPreference
   quality?: QualityPreference
+  overlayRenderer?: OverlayRendererPreference
   /** Megabyte cap for size-targeted export; null/0 clears it. */
   sizeTargetMb?: number | null
   branding?: Partial<BrandingSettings>

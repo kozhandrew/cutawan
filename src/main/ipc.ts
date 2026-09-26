@@ -14,6 +14,7 @@ import type {
 } from '@shared/types'
 import { VIDEO_EXTENSIONS } from '@shared/video'
 import { sizeTargetBytesFromMb } from '@shared/uploadBudget'
+import { applyClipSettings, type ClipSettingsSelection } from '@shared/clipSettings'
 import { invalidateExportForClipSave, staleExportForTranscriptChange } from '@shared/exportState'
 import { highlightClips } from '@shared/wholeVideo'
 import { mergeClipSave, needsReframe } from '@shared/reframe'
@@ -214,6 +215,17 @@ export function registerIpcHandlers(): void {
     })
   })
 
+  handle('project:applyClipSettings', async (_e, projectId: string, sourceClipId: string, selection: ClipSettingsSelection) => {
+    return updateProject(projectId, (project) => {
+      const source = project.clips.find((clip) => clip.id === sourceClipId)
+      if (!source) throw new Error('Source clip not found')
+      project.clips = project.clips.map((target) => {
+        if (target.id === source.id) return target
+        return invalidateExportForClipSave(applyClipSettings(source, target, selection), target)
+      })
+    })
+  })
+
   handle('clip:ensureReframe', async (_e, projectId: string, clipId: string, retryLayout?: boolean) => {
     return ensureClipReframe(projectId, clipId, undefined, retryLayout === true)
   })
@@ -323,7 +335,7 @@ export function registerIpcHandlers(): void {
         clip.broll.some((item) => item.enabled && Boolean(item.imagePath)) ||
         Boolean(renderBranding.enabled && renderBranding.imagePath)
       let rendered
-      if (hasVisualOverlay) {
+      if (hasVisualOverlay && prefs.overlayRenderer === 'chromium') {
         try {
           rendered = await renderClip({
             ...renderJob,

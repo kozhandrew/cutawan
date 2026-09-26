@@ -9,6 +9,7 @@ import type {
   BrandVoiceSettings,
   BrowserCookieSource,
   EncoderPreference,
+  OverlayRendererPreference,
   QualityPreference,
   SettingsUpdate,
 } from '@shared/types'
@@ -32,6 +33,7 @@ interface StoredSettings {
   transcriptionBaseUrl: string
   encoder: EncoderPreference
   quality: QualityPreference
+  overlayRenderer: OverlayRendererPreference
   /** Megabyte cap for size-targeted export; null = quality-targeted encode. */
   sizeTargetMb: number | null
   branding: BrandingSettings
@@ -70,6 +72,7 @@ const DEFAULTS: StoredSettings = {
   transcriptionBaseUrl: '',
   encoder: 'auto',
   quality: 'standard',
+  overlayRenderer: 'chromium',
   sizeTargetMb: null,
   branding: DEFAULT_BRANDING,
   brandVoice: DEFAULT_BRAND_VOICE,
@@ -184,6 +187,7 @@ export async function getSettings(): Promise<AppSettings> {
     openaiBaseUrlFromEnv: Boolean(process.env.OPENAI_BASE_URL?.trim()),
     encoder: s.encoder,
     quality: s.quality,
+    overlayRenderer: s.overlayRenderer,
     sizeTargetMb: s.sizeTargetMb,
     gpu: await getGpuStatus(),
     branding: s.branding,
@@ -219,10 +223,11 @@ export function getBrandVoiceSettings(): BrandVoiceSettings {
 export function getExportPreferences(): {
   encoder: EncoderPreference
   quality: QualityPreference
+  overlayRenderer: OverlayRendererPreference
   sizeTargetMb: number | null
 } {
   const s = load()
-  return { encoder: s.encoder, quality: s.quality, sizeTargetMb: s.sizeTargetMb }
+  return { encoder: s.encoder, quality: s.quality, overlayRenderer: s.overlayRenderer, sizeTargetMb: s.sizeTargetMb }
 }
 
 /** Synchronous access to the stored model preferences (no GPU probe). */
@@ -259,6 +264,7 @@ export async function updateSettings(update: SettingsUpdate): Promise<AppSetting
   }
   if (update.encoder !== undefined) s.encoder = update.encoder
   if (update.quality !== undefined) s.quality = update.quality
+  if (update.overlayRenderer !== undefined) s.overlayRenderer = update.overlayRenderer
   if (update.sizeTargetMb !== undefined) s.sizeTargetMb = normalizeSizeTargetMb(update.sizeTargetMb)
   if (update.branding !== undefined) {
     const b = update.branding
