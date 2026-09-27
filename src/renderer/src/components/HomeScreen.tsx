@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Upload,
   Captions,
@@ -62,7 +62,7 @@ export default function HomeScreen(): React.JSX.Element {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl px-8 py-10">
-        {project ? <SetupPanel /> : <ImportHero />}
+        {project ? <SetupPanel key={`${project.id}:${project.activeClipGenerationId ?? ''}`} /> : <ImportHero />}
         <RecentProjects />
       </div>
     </div>
@@ -304,19 +304,6 @@ function SetupPanel(): React.JSX.Element {
   const [hookFirst, setHookFirst] = useState(activeGeneration?.options.hookFirst ?? false)
   const [visualDiscovery, setVisualDiscovery] = useState(activeGeneration?.options.visualDiscovery ?? project.visualDiscovery ?? false)
   const [editorialRanking, setEditorialRanking] = useState(activeGeneration?.options.editorialRanking ?? project.rankingEnabled ?? false)
-
-  useEffect(() => {
-    if (!activeGeneration) return
-    const options = activeGeneration.options
-    setMode('clips')
-    setPrompt(options.prompt)
-    setClipLength(options.clipLength)
-    setVideoType(options.videoType)
-    setBroll(options.broll)
-    setHookFirst(options.hookFirst)
-    setVisualDiscovery(options.visualDiscovery === true)
-    setEditorialRanking(options.editorialRanking === true)
-  }, [activeGeneration?.id, activeGeneration?.updatedAt])
 
   // Captioning an already-transcribed video makes no API calls, so it does not
   // need a key; clip finding always does.

@@ -67,7 +67,9 @@ export function ensureClipGenerationHistory(project: Project, fallback = generat
 
 /** Keep the persisted generation snapshot aligned with the legacy active fields. */
 export function syncActiveClipGeneration(project: Project): void {
-  ensureClipGenerationHistory(project)
+  // Migration may create the first snapshot, but an existing snapshot must
+  // never be applied here: callers have already edited project.clips in memory.
+  if (!project.clipGenerations?.length) ensureClipGenerationHistory(project)
   const active = project.clipGenerations?.find(generation => generation.id === project.activeClipGenerationId)
   if (!active) return
   active.updatedAt = Date.now()

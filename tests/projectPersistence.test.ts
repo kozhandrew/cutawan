@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Project } from '@shared/types'
+import { activateClipGeneration, appendClipGeneration } from '@shared/clipGenerations'
 
 const mock = vi.hoisted(() => ({ root: '' }))
 vi.mock('electron', () => ({ app: { getPath: () => mock.root } }))
@@ -75,4 +76,56 @@ it('migrates a legacy clip list to a saved first generation without losing its e
   const persisted = await loadProject(project.id)
   expect(persisted.activeClipGenerationId).toBe(persisted.clipGenerations?.[0].id)
   expect(persisted.clipGenerations?.[0].clips[0].export?.outputPath).toBe('/outside/keep.mp4')
+
+  const edited = await updateProject(project.id, current => {
+    current.clips[0].hook = 'Updated hook'
+    current.clips[0].edit.captionStyleId = 'beast'
+    current.clips[0].edit.showTitle = true
+    current.clips[0].edit.reframeMode = 'fit-letterbox'
+    current.clips[0].edit.tightenCuts = true
+  })
+  expect(edited.clips[0].hook).toBe('Updated hook')
+  expect(edited.clips[0].edit).toMatchObject({
+    captionStyleId: 'beast', showTitle: true, reframeMode: 'fit-letterbox', tightenCuts: true
+  })
+  const reopened = await loadProject(project.id)
+  expect(reopened.clips[0].edit.captionStyleId).toBe('beast')
+  expect(reopened.clipGenerations?.[0].clips[0].edit.captionStyleId).toBe('beast')
+})
+
+it('persists edits in a new generation and restores each version after switching', async () => {
+  const project: Project = {
+    id: 'generation-edit-test', createdAt: 1, updatedAt: 1, name: 'Generated clips',
+    video: { path: join(mock.root, 'generated.mp4'), fileName: 'generated.mp4', durationSec: 20,
+      width: 640, height: 360, fps: 25, sizeBytes: 0, hasAudio: true },
+    transcript: null, prompt: 'First prompt', videoType: 'podcast',
+    clips: [{
+      id: 'first-clip', title: 'First', hook: '', summary: '', hashtags: [], viralityScore: 80, viralityReason: '',
+      visualSummary: null, thumbnailPath: null, focusTrack: null, broll: [], suggestedStart: 0, suggestedEnd: 10,
+      edit: { start: 0, end: 10, aspect: '9:16', captionsEnabled: true, captionStyleId: 'default' }
+    }]
+  } as unknown as Project
+  await saveProject(project)
+  const firstId = (await loadProject(project.id)).activeClipGenerationId!
+
+  await updateProject(project.id, current => {
+    appendClipGeneration(current, {
+      id: 'second-generation', createdAt: 2,
+      options: { prompt: 'Second prompt', clipLength: 'short', broll: false, hookFirst: false, videoType: 'podcast' },
+      clips: [{ ...structuredClone(current.clips[0]), id: 'second-clip' }]
+    })
+  })
+  await updateProject(project.id, current => {
+    current.clips[0].edit.captionStyleId = 'beast'
+    current.clips[0].edit.showTitle = true
+  })
+
+  const edited = await loadProject(project.id)
+  expect(edited.clips[0].edit).toMatchObject({ captionStyleId: 'beast', showTitle: true })
+  expect(edited.clipGenerations?.[1].clips[0].edit.captionStyleId).toBe('beast')
+
+  await updateProject(project.id, current => { activateClipGeneration(current, firstId) })
+  expect((await loadProject(project.id)).clips[0].edit.captionStyleId).toBe('default')
+  await updateProject(project.id, current => { activateClipGeneration(current, 'second-generation') })
+  expect((await loadProject(project.id)).clips[0].edit.captionStyleId).toBe('beast')
 })
