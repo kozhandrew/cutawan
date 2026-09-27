@@ -383,6 +383,7 @@ export type BackgroundReframeEvent =
   | { projectId: string; clipId: string; state: 'running' }
   | { projectId: string; clipId: string; state: 'done'; clip: Clip }
   | { projectId: string; clipId: string; state: 'failed'; message: string }
+  | { projectId: string; clipId: string; state: 'cancelled' }
 
 export interface ExportResult {
   clipId: string
@@ -404,6 +405,8 @@ export interface ExportResult {
   overBudget?: boolean
   /** Persisted status that the renderer can graft into the open project. */
   exportState: ClipExportState
+  /** Framing analysis may have completed during export. */
+  framedClip: Clip
 }
 
 export interface ClipInfoExportResult {

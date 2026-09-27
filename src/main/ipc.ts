@@ -429,6 +429,7 @@ export function registerIpcHandlers(): void {
         outputPath: rendered.outputPath,
         bytes: rendered.bytes,
         exportState,
+        framedClip: clip,
         ...(sizeTargetBytes !== undefined
           ? {
               sizeTargetBytes,

@@ -50,7 +50,7 @@ it('stops waiting when cancelled and clears the Framing badge for aborted clips'
   release()
   await run
   const started = events.filter(e => e.state === 'running').map(e => e.clipId).sort()
-  const cleared = events.filter(e => e.state === 'failed').map(e => e.clipId).sort()
+  const cleared = events.filter(e => e.state === 'cancelled').map(e => e.clipId).sort()
   expect(started.length).toBeGreaterThan(0)
   expect(cleared).toEqual(started)
   expect(events.some(e => e.state === 'done')).toBe(false)

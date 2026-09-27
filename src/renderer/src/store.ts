@@ -224,14 +224,18 @@ export const useStore = create<AppState>((set, get) => ({
       if (get().importProgress !== null) set({ importProgress: p })
     })
     window.cutawan.onBackgroundReframe((event) => {
+      const current = get().project
+      if (current?.id !== event.projectId || !current.clips.some((clip) => clip.id === event.clipId)) return
       const running = { ...get().backgroundReframing }
       if (event.state === 'running') running[event.clipId] = true
       else delete running[event.clipId]
-      const current = get().project
-      if (event.state === 'done' && current?.id === event.projectId && current.clips.some((clip) => clip.id === event.clipId)) {
+      if (event.state === 'done') {
         // Graft only what the analysis owns: edits made while it ran stay.
+        const errors = { ...get().reframeError }
+        delete errors[event.clipId]
         set({
           backgroundReframing: running,
+          reframeError: errors,
           project: {
             ...current,
             clips: current.clips.map((c) =>
@@ -241,9 +245,14 @@ export const useStore = create<AppState>((set, get) => ({
         })
         absorbExternal(event.clipId)
       } else {
-        // A failed background run stays pending without an error, so opening
-        // the clip retries it.
-        set({ backgroundReframing: running })
+        // A cancelled run is still pending; genuine failures are visible on
+        // the grid and can be retried from the editor.
+        set({
+          backgroundReframing: running,
+          ...(event.state === 'failed' && current.clips.some((clip) => clip.id === event.clipId && needsReframe(clip))
+            ? { reframeError: { ...get().reframeError, [event.clipId]: cleanIpcError(event.message) } }
+            : {})
+        })
       }
     })
     window.cutawan.onExportProgress((p) => {
@@ -298,7 +307,10 @@ export const useStore = create<AppState>((set, get) => ({
       exports: persistedExports(project),
       screen: wholeVideo ? 'editor' : project.clips.length > 0 ? 'clips' : 'home',
       selectedClipId: wholeVideo?.id ?? null,
-      pipelineError: null
+      pipelineError: null,
+      backgroundReframing: {},
+      reframeBusy: {},
+      reframeError: {}
     })
   },
 
@@ -629,10 +641,15 @@ export const useStore = create<AppState>((set, get) => ({
       })
       const current = get().project
       if (current?.id === project.id) {
+        const errors = { ...get().reframeError }
+        delete errors[clipId]
         set({ project: {
           ...current,
-          clips: current.clips.map((clip) => clip.id === clipId ? { ...clip, export: result.exportState } : clip)
-        } })
+          clips: current.clips.map((clip) => clip.id === clipId
+            ? { ...mergeReframeResult(clip, result.framedClip, current.videoType), export: result.exportState }
+            : clip)
+        }, reframeError: errors })
+        absorbExternal(clipId)
       }
     } catch (err) {
       const message = err instanceof Error ? cleanIpcError(err.message) : String(err)

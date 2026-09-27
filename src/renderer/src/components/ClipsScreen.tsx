@@ -11,6 +11,7 @@ import {
   RefreshCw,
   FileText,
   Sparkles,
+  Clock3,
   X
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -24,6 +25,7 @@ import { findWholeVideoClip, highlightClips } from '@shared/wholeVideo'
 import { editedClipDuration } from '@shared/tighten'
 import { layoutReviewMessage } from '@shared/contentType'
 import { editorialAssessmentCurrent, editorialReportMatchesClips } from '@shared/editorialRanking'
+import { framingReadiness, needsReframe } from '@shared/reframe'
 
 export default function ClipsScreen(): React.JSX.Element {
   const project = useStore((s) => s.project)
@@ -45,6 +47,7 @@ export default function ClipsScreen(): React.JSX.Element {
   const currentRanking = editorialReportMatchesClips(project)
   const earlierRanking = !!project.editorialRanking && !currentRanking
   const doneCount = clips.filter((c) => exports[c.id]?.status === 'done').length
+  const framingReadyCount = clips.filter((c) => !needsReframe(c)).length
 
   return (
     <div className="h-full overflow-y-auto">
@@ -121,6 +124,12 @@ export default function ClipsScreen(): React.JSX.Element {
         <DiscoverySummary report={project.discoveryReport} earlierAttempt={!!project.discoveryReport?.generationId && project.discoveryReport.generationId !== project.clipsGenerationId} />
         <EditorialRankingSummary report={project.editorialRanking} earlierAttempt={earlierRanking} />
 
+        {clips.length > 0 && (
+          <p className="mt-4 text-xs text-zinc-400" data-testid="framing-summary">
+            Framing ready: {framingReadyCount}/{clips.length}. You can edit clips now; unfinished framing prepares in the background or when a clip is opened or exported.
+          </p>
+        )}
+
         {wholeVideo && <WholeVideoBanner clip={wholeVideo} />}
 
         <div className="mt-6 grid grid-cols-2 gap-5 xl:grid-cols-3">
@@ -166,7 +175,9 @@ function ClipCard({ clip, rank }: { clip: Clip; rank: number }): React.JSX.Eleme
   const clearExport = useStore((s) => s.clearExport)
   const exports = useStore((s) => s.exports)
   const entry = exports[clip.id]
-  const framing = useStore((s) => s.backgroundReframing[clip.id] === true)
+  const framing = useStore((s) => s.backgroundReframing[clip.id] === true || s.reframeBusy[clip.id] === true)
+  const framingError = useStore((s) => s.reframeError[clip.id])
+  const readiness = framingReadiness(clip, framing, framingError)
   const transcript = useStore((s) => s.project?.transcript ?? null)
   const duration = useMemo(() => editedClipDuration(clip, transcript), [clip, transcript])
   const assessmentCurrent = useMemo(() => editorialAssessmentCurrent(clip, transcript), [clip, transcript])
@@ -193,12 +204,14 @@ function ClipCard({ clip, rank }: { clip: Clip; rank: number }): React.JSX.Eleme
           </span>
           <EditorialScore clip={clip} current={assessmentCurrent} />
         </div>
-        {framing && (
-          <span className="absolute bottom-2.5 left-2.5 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-zinc-300 backdrop-blur">
-            <Loader2 size={11} className="animate-spin" />
-            Framing…
-          </span>
-        )}
+        <span
+          data-testid="clip-framing-status"
+          title={readiness === 'failed' ? `Framing failed: ${framingError}. Open the clip to retry.` : readiness === 'pending' ? 'Framing prepares when opened or exported. You can edit now.' : undefined}
+          className={`absolute bottom-2.5 left-2.5 flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-medium backdrop-blur ${readiness === 'failed' ? 'text-amber-300' : readiness === 'ready' ? 'text-emerald-300' : 'text-zinc-200'}`}
+        >
+          {readiness === 'preparing' ? <Loader2 size={11} className="animate-spin" /> : readiness === 'ready' ? <Check size={11} /> : readiness === 'failed' ? <AlertTriangle size={11} /> : <Clock3 size={11} />}
+          {readiness === 'preparing' ? 'Preparing framing…' : readiness === 'ready' ? 'Framing ready' : readiness === 'failed' ? 'Framing failed' : 'Framing pending'}
+        </span>
         <span className="absolute bottom-2.5 right-2.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-zinc-200 backdrop-blur">
           {formatDuration(duration)}
         </span>

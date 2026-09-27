@@ -3,6 +3,7 @@ import {
   EAGER_REFRAME_MAX,
   EAGER_REFRAME_MIN,
   EAGER_REFRAME_SCORE,
+  framingReadiness,
   layoutUntouched,
   mergeClipSave,
   mergeReframeResult,
@@ -125,6 +126,16 @@ describe('needsReframe', () => {
     // Older projects never carried the field; loadProject fills 'done' in,
     // but a bare clip object must still read as analysed.
     expect(needsReframe(clip('a', 50, { reframeStatus: undefined }))).toBe(false)
+  })
+})
+
+describe('framingReadiness', () => {
+  it('distinguishes ready, active, pending and failed framing independently of export state', () => {
+    const pending = clip('pending', 50)
+    expect(framingReadiness(pending, false)).toBe('pending')
+    expect(framingReadiness(pending, true)).toBe('preparing')
+    expect(framingReadiness(pending, false, 'Inference failed')).toBe('failed')
+    expect(framingReadiness(clip('ready', 50, { reframeStatus: 'done' }), false)).toBe('ready')
   })
 })
 

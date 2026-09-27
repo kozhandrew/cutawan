@@ -37,11 +37,13 @@ export function startBackgroundReframes(
     } catch (error) {
       // Always clear the renderer's "Framing…" badge — including on cancel —
       // otherwise backgroundReframing stays stuck until a later done/failed.
-      if (!controller.signal.aborted) {
+      if (controller.signal.aborted) {
+        notify({ projectId: project.id, clipId: clip.id, state: 'cancelled' })
+      } else {
         console.error(`Background layout failed for clip ${clip.id}:`, error)
+        notify({ projectId: project.id, clipId: clip.id, state: 'failed',
+          message: error instanceof Error ? error.message : String(error) })
       }
-      notify({ projectId: project.id, clipId: clip.id, state: 'failed',
-        message: error instanceof Error ? error.message : String(error) })
     }
   }), { clips: clips.length }).finally(() => {
     if (running.get(project.id) === controller) running.delete(project.id)
